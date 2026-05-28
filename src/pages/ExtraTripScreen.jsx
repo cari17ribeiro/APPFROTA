@@ -1,29 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Camera, Image as ImageIcon, CheckCircle, AlertCircle, Loader2, XCircle, ArrowRight, Truck, Search, Download, ZoomIn } from 'lucide-react';
-
-// Função utilitária para calcular a Distância de Levenshtein (Fuzzy Matching)
-const getLevenshteinDistance = (a, b) => {
-  if (a.length === 0) return b.length;
-  if (b.length === 0) return a.length;
-  const matrix = [];
-  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
-  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
-  
-  for (let i = 1; i <= b.length; i++) {
-    for (let j = 1; j <= a.length; j++) {
-      if (b.charAt(i - 1) === a.charAt(j - 1)) {
-        matrix[i][j] = matrix[i - 1][j - 1];
-      } else {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1, // Substituição
-          matrix[i][j - 1] + 1,     // Inserção
-          matrix[i - 1][j] + 1      // Deleção
-        );
-      }
-    }
-  }
-  return matrix[b.length][a.length];
-};
+import { Camera, Image as ImageIcon, CheckCircle, AlertCircle, Loader2, XCircle, ArrowRight, Truck, Search } from 'lucide-react';
 
 export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase }) {
   // Passos: 1 = Câmera Unificada, 2 = Formulário/Processamento
@@ -59,15 +35,13 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
   const [destinoManual, setDestinoManual] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   
-  // Controle de Câmera e Zoom
+  // Controle de Câmera
   const [isCameraActive, setIsCameraActive] = useState(false);
-  const [zoomLevel, setZoomLevel] = useState(1);
-  const [zoomCapabilities, setZoomCapabilities] = useState(null);
-  
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
   
+  // Apenas a chave do Google Cloud é necessária agora
   const GOOGLE_VISION_API_KEY = import.meta.env.VITE_GOOGLE_VISION_API_KEY;
 
   useEffect(() => {
@@ -84,29 +58,9 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
       });
       streamRef.current = stream;
       if (videoRef.current) videoRef.current.srcObject = stream;
-
-      const track = stream.getVideoTracks()[0];
-      const capabilities = track.getCapabilities();
-      if (capabilities.zoom) {
-        setZoomCapabilities({
-          min: capabilities.zoom.min,
-          max: capabilities.zoom.max,
-          step: capabilities.zoom.step
-        });
-        setZoomLevel(capabilities.zoom.min);
-      }
     } catch (error) {
       alert("Não foi possível abrir a câmera. Certifique-se de dar permissão ou use a Galeria.");
       setIsCameraActive(false);
-    }
-  };
-
-  const handleZoom = async (e) => {
-    const val = Number(e.target.value);
-    setZoomLevel(val);
-    if (streamRef.current) {
-      const track = streamRef.current.getVideoTracks()[0];
-      await track.applyConstraints({ advanced: [{ zoom: val }] });
     }
   };
 
@@ -116,7 +70,6 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
       streamRef.current = null;
     }
     setIsCameraActive(false);
-    setZoomCapabilities(null);
   };
 
   const takePhoto = () => {
@@ -159,17 +112,8 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
     stopCamera();
     setStep(2); 
 
+    // Dispara a IA do Google Vision para ler TUDO de uma vez
     runVisionOCR(base64Image); 
-  };
-
-  const baixarImagem = () => {
-    if (!previewUrl) return;
-    const a = document.createElement('a');
-    a.href = previewUrl;
-    a.download = `StatusDiario_Offline_${Date.now()}.jpg`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
   };
 
   const setMetadados = (selectedFile = null) => {
@@ -179,7 +123,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
     setHoraFoto(dateToUse.toTimeString().split(' ')[0].substring(0, 5));
   };
 
-  // 1. GOOGLE VISION (Cérebro do OCR) - OTIMIZADO PARA VERTICAL
+  // 1. GOOGLE VISION (Contêiner e Placa simultâneos)
   const runVisionOCR = async (base64Image) => {
     setIsVisionLoading(true);
     try {
@@ -187,11 +131,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          requests: [{ 
-            image: { content: base64Image }, 
-            // O uso de DOCUMENT_TEXT_DETECTION é vital para ler contêineres na vertical e separar colunas
-            features: [{ type: 'DOCUMENT_TEXT_DETECTION' }] 
-          }]
+          requests: [{ image: { content: base64Image }, features: [{ type: 'TEXT_DETECTION' }] }]
         })
       });
 
@@ -201,49 +141,45 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
 
       if (!detectedText) throw new Error('Sem texto na imagem');
 
+      // Guardamos o texto original em maiúsculas (com espaços e hífens intactos)
       const originalUpper = detectedText.toUpperCase();
       
-      // ==========================================
-      // A) EXTRAÇÃO DO CONTÊINER OTIMIZADA
-      // ==========================================
-      let finalContainer = null;
-      
-      // Removemos todos os espaços e quebras para juntar o texto vertical em uma única string coesa
+      // Criamos a versão espremida apenas para buscar o contêiner
       let cleanText = originalUpper.replace(/[\n\r\s-]/g, '');
       
-      // Regex que procura o padrão ISO estrito: 
-      // 4 letras (onde a última é U, J ou Z) seguidas de 7 dígitos (ou letras que parecem dígitos)
-      const containerRegex = /([A-Z]{3}[UJZ])([0-9OILSBZQ]{7})/g;
-      const matches = [...cleanText.matchAll(containerRegex)];
-
-      if (matches.length > 0) {
-        // Pegamos a primeira ocorrência válida
-        const prefixo = matches[0][1];
-        let numeros = matches[0][2];
-
-        // Limpamos confusões típicas de OCR EXCLUSIVAMENTE na parte dos números
-        // Isso impede que as letras do prefixo sejam afetadas.
-        numeros = numeros
-          .replace(/O/g, '0')
-          .replace(/Q/g, '0')
-          .replace(/I/g, '1')
-          .replace(/L/g, '1')
-          .replace(/Z/g, '2')
-          .replace(/S/g, '5')
-          .replace(/B/g, '8');
-
-        finalContainer = prefixo + numeros;
-      }
+      // ==========================================
+      // A) EXTRAÇÃO DO CONTÊINER (Usa o texto espremido)
+      // ==========================================
+      let finalContainer = null;
+      const perfectMatch = cleanText.match(/[A-Z]{4}\d{7}/);
       
+      if (perfectMatch) {
+        finalContainer = perfectMatch[0];
+      } else {
+        const prefixMatch = cleanText.match(/[A-Z]{3}[UJZ]/); 
+        if (prefixMatch) {
+          const prefix = prefixMatch[0];
+          let remainder = cleanText.substring(cleanText.indexOf(prefix) + 4)
+            .replace(/O/g, '0').replace(/I/g, '1').replace(/L/g, '1')
+            .replace(/S/g, '5').replace(/B/g, '8').replace(/Z/g, '2');
+          const numbersMatch = remainder.match(/\d{7}/);
+          if (numbersMatch) finalContainer = prefix + numbersMatch[0];
+        }
+      }
       if (finalContainer) setContainer(finalContainer);
 
       // ==========================================
-      // B) EXTRAÇÃO DA PLACA
+      // B) EXTRAÇÃO DA PLACA (Usa o texto original)
       // ==========================================
+      // \b       -> Garante que é uma palavra isolada (ignora o ACU do UACU)
+      // \s*-?\s* -> Permite espaços vazios ou hífens opcionais entre as letras e números (ex: GIF - 5903)
       const plateRegex = /\b[A-Z]{3}\s*-?\s*[0-9][A-Z0-9][0-9]{2}\b/g;
+      
       const plateMatches = originalUpper.match(plateRegex);
 
       if (plateMatches && plateMatches.length > 0) {
+        // Pega a primeira placa encontrada, mas agora removemos os espaços e hífens 
+        // para salvar no banco de dados limpinho (ex: GIF5903)
         const placaEncontrada = plateMatches[0].replace(/[\n\r\s-]/g, '');
         setPlaca(placaEncontrada);
         buscarDadosVeiculo(placaEncontrada);
@@ -256,52 +192,25 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
     }
   };
 
-  // 2. BUSCA NO BANCO + INTELIGÊNCIA FUZZY MATCHING
-  const buscarDadosVeiculo = async (placaLida) => {
+  // 2. BUSCA SUPABASE (Frota)
+  const buscarDadosVeiculo = async (carretaBuscada) => {
     try {
-      const { data: exactData, error: exactError } = await supabase
+      const { data, error } = await supabase
         .from('veiculos')
         .select('placa, frota, carreta')
-        .or(`carreta.ilike.%${placaLida}%,placa.ilike.%${placaLida}%`)
-        .limit(1);
+        .ilike('carreta', `%${carretaBuscada.substring(0,3)}%${carretaBuscada.substring(3)}%`)
+        .limit(1)
+        .single();
+        
+      if (error) throw error;
 
-      if (!exactError && exactData && exactData.length > 0) {
-        const v = exactData[0];
-        setFrota(v.frota);
-        setPlaca(v.placa); 
-        setCarreta(v.carreta);
-        return;
-      }
-
-      const { data: frotaCompleta, error: fetchError } = await supabase
-        .from('veiculos')
-        .select('placa, frota, carreta');
-
-      if (fetchError) throw fetchError;
-
-      if (frotaCompleta && frotaCompleta.length > 0) {
-        let melhorMatch = null;
-        let menorDistancia = 999;
-
-        for (const veiculo of frotaCompleta) {
-          const distPlaca = getLevenshteinDistance(placaLida, veiculo.placa || '');
-          const distCarreta = getLevenshteinDistance(placaLida, veiculo.carreta || '');
-          const distMinima = Math.min(distPlaca, distCarreta);
-
-          if (distMinima < menorDistancia) {
-            menorDistancia = distMinima;
-            melhorMatch = veiculo;
-          }
-        }
-
-        if (menorDistancia <= 2 && melhorMatch) {
-          setFrota(melhorMatch.frota);
-          setPlaca(melhorMatch.placa); 
-          setCarreta(melhorMatch.carreta);
-        }
+      if (data) {
+        setFrota(data.frota);
+        setPlaca(data.placa); 
+        setCarreta(data.carreta); 
       }
     } catch (error) {
-      console.log("Erro ao processar validação de frota por aproximação:", error);
+      console.log("Placa lida pela IA, mas não encontrada no banco de dados.", error);
     }
   };
 
@@ -312,6 +221,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
     try {
       let urlUnica = null;
 
+      // Upload da Foto Única
       if (file) {
         const ext = file.name.split('.').pop() || 'jpg';
         const name = `foto-dupla-${currentUser.id}-${Date.now()}.${ext}`;
@@ -323,6 +233,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
       let destinoFinal = destinoSelect === 'DIGITAR MANUALMENTE' ? destinoManual : destinoSelect;
       
       if (tipoOperacao === 'REMOÇÃO' || tipoOperacao === 'PESAGEM') destinoFinal = origemFinal;
+
       const operacaoFinal = tipoOperacao === 'OUTRO' ? outroOperacao.toUpperCase() : tipoOperacao;
       
       const viagemData = {
@@ -368,7 +279,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
             <div className="bg-white/20 p-2 rounded-xl"><Truck className="w-5 h-5 text-teal-300" /></div>
             <div>
               <h2 className="text-xl font-black tracking-tight">Registo de Extra</h2>
-              <p className="text-xs text-slate-300 font-medium mt-0.5">Captura Unificada Inteligente</p>
+              <p className="text-xs text-slate-300 font-medium mt-0.5">Captura Unificada (Contêiner e Placa)</p>
             </div>
           </div>
           <button onClick={() => { stopCamera(); onClose(); }} className="p-2 hover:bg-white/10 rounded-full text-slate-300 hover:text-white transition-colors">
@@ -387,7 +298,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
                     <Camera className="w-8 h-8" />
                   </div>
                   <h3 className="text-xl font-bold text-slate-800">Fotografe o Conjunto</h3>
-                  <p className="text-sm text-slate-500 max-w-sm mx-auto">Enquadre o contêiner e a placa livremente. O formato não importa.</p>
+                  <p className="text-sm text-slate-500 max-w-sm mx-auto">Enquadre o número do contêiner e a placa do veículo em uma única foto usando os guias.</p>
 
                   <div className="grid grid-cols-1 gap-4 max-w-md mx-auto w-full">
                     <button type="button" onClick={startCamera} className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl p-5 flex items-center justify-center space-x-3 shadow-md transition-colors">
@@ -406,40 +317,30 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
                   <div className="relative w-full aspect-[3/4] max-w-md bg-black rounded-2xl overflow-hidden shadow-inner">
                     <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
                     
-                    {/* Guia de Scanner Livre */}
-                    <div className="absolute inset-0 pointer-events-none">
-                      <div className="w-full h-full border-[40px] border-black/50 relative">
-                        <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-teal-400"></div>
-                        <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-teal-400"></div>
-                        <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-teal-400"></div>
-                        <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-teal-400"></div>
-                        
-                        <p className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-white/80 font-black text-xs text-center w-full px-4 tracking-widest uppercase">
-                          Enquadre os textos aqui
-                        </p>
+                    {/* GUIAS VISUAIS - ESTILO DESIGN SOLICITADO */}
+                    <div className="absolute inset-0 flex flex-col justify-between p-6 pb-12">
+                      {/* Guia Amarelo (Contêiner) */}
+                      <div className="w-full h-[40%] border-4 border-dashed border-yellow-400 rounded-xl bg-yellow-400/20 flex flex-col items-center justify-end pb-4 shadow-[0_0_0_999px_rgba(15,23,42,0.4)]">
+                        <span className="text-white text-[10px] font-black tracking-widest uppercase bg-slate-900/80 px-3 py-1.5 rounded-full shadow-lg">
+                          Alinhe o Contêiner Aqui
+                        </span>
+                      </div>
+                      
+                      {/* Espaçador */}
+                      <div className="flex-1"></div>
+
+                      {/* Guia Azul (Placa) */}
+                      <div className="w-full h-[25%] border-4 border-dashed border-blue-400 rounded-xl bg-blue-500/20 flex flex-col items-center justify-end pb-3">
+                        <span className="text-white text-[10px] font-black tracking-widest uppercase bg-slate-900/80 px-3 py-1.5 rounded-full shadow-lg">
+                          Alinhe a Placa Aqui
+                        </span>
                       </div>
                     </div>
-
-                    {/* Controle de Zoom */}
-                    {zoomCapabilities && (
-                      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-[80%] flex items-center space-x-3 bg-slate-900/40 p-3 rounded-full backdrop-blur-md border border-white/10 shadow-xl pointer-events-auto">
-                        <ZoomIn className="w-5 h-5 text-white shrink-0" />
-                        <input
-                          type="range"
-                          min={zoomCapabilities.min}
-                          max={zoomCapabilities.max}
-                          step={zoomCapabilities.step}
-                          value={zoomLevel}
-                          onChange={handleZoom}
-                          className="w-full h-1 bg-white/30 rounded-lg appearance-none cursor-pointer accent-teal-400"
-                        />
-                      </div>
-                    )}
                   </div>
 
                   <div className="flex items-center space-x-4 w-full max-w-md">
                     <button type="button" onClick={stopCamera} className="flex-1 bg-white border border-slate-300 text-slate-700 py-3.5 rounded-xl font-bold hover:bg-slate-50 transition-colors">Cancelar</button>
-                    <button type="button" onClick={takePhoto} className="flex-1 bg-indigo-600 text-white py-3.5 rounded-xl font-bold hover:bg-indigo-700 shadow-md transition-colors">Capturar Foto</button>
+                    <button type="button" onClick={takePhoto} className="flex-1 bg-indigo-600 text-white py-3.5 rounded-xl font-bold hover:bg-indigo-700 shadow-md transition-colors">Capturar Foto Única</button>
                   </div>
                 </div>
               )}
@@ -463,6 +364,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
                 </div>
               )}
 
+              {/* Box de IA e Previews */}
               <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
                 {isVisionLoading && (
                   <div className="flex items-center text-indigo-600 font-bold text-sm bg-indigo-50 p-3 rounded-xl border border-indigo-100">
@@ -471,23 +373,20 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
                 )}
                 
                 <div className="flex flex-col sm:flex-row gap-5">
-                  <div className="w-full sm:w-1/3 flex flex-col space-y-2 shrink-0">
-                    <div className="aspect-[3/4] bg-slate-100 rounded-xl overflow-hidden border border-slate-200">
-                      {previewUrl ? <img src={previewUrl} alt="Captura" className="w-full h-full object-cover" /> : <div className="flex items-center justify-center h-full text-slate-400 text-xs font-bold">Sem foto</div>}
-                    </div>
-                    {previewUrl && (
-                      <button type="button" onClick={baixarImagem} className="w-full flex items-center justify-center bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-lg text-xs font-bold transition-colors border border-slate-200">
-                        <Download className="w-4 h-4 mr-1.5" /> Salvar no Celular
-                      </button>
-                    )}
+                  {/* Imagem Única */}
+                  <div className="w-full sm:w-1/3 aspect-[3/4] bg-slate-100 rounded-xl overflow-hidden border border-slate-200 shrink-0">
+                    {previewUrl ? <img src={previewUrl} alt="Captura" className="w-full h-full object-cover" /> : <div className="flex items-center justify-center h-full text-slate-400 text-xs font-bold">Sem foto</div>}
                   </div>
 
+                  {/* Resultados Lado a Lado */}
                   <div className="flex-1 flex flex-col justify-center space-y-3">
+                    {/* Bloco Contêiner */}
                     <div className={`p-3 rounded-xl border ${container ? 'bg-yellow-50 border-yellow-200' : 'bg-slate-50 border-slate-200'}`}>
                       <span className="text-[10px] font-black text-slate-400 block uppercase tracking-wider mb-0.5">Leitura do Contêiner</span>
                       <span className={`text-lg font-black tracking-wider ${!container && 'text-slate-400'}`}>{container || (isVisionLoading ? 'Analisando...' : 'NÃO LIDO')}</span>
                     </div>
 
+                    {/* Bloco Placa */}
                     <div className={`p-3 rounded-xl border ${placa ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-200'}`}>
                       <span className="text-[10px] font-black text-slate-400 block uppercase tracking-wider mb-0.5">Leitura da Placa</span>
                       <span className={`text-lg font-black tracking-wider ${!placa && 'text-slate-400'}`}>{placa || (isVisionLoading ? 'Analisando...' : 'NÃO LIDA')}</span>
@@ -524,7 +423,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
                   </div>
                   {tipoOperacao === 'OUTRO' && (
                     <input type="text" required value={outroOperacao} onChange={e => setOutroOperacao(e.target.value)} placeholder="Especifique a operação..." className="w-full mt-3 bg-slate-50 rounded-xl p-3 text-sm border outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
-                  </div>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
