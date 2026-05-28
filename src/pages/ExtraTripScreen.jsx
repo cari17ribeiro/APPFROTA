@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Camera, Image as ImageIcon, CheckCircle, AlertCircle, Loader2, XCircle, ArrowRight, Truck, Search } from 'lucide-react';
+import { Camera, Image as ImageIcon, CheckCircle, AlertCircle, Loader2, XCircle, ArrowRight, Truck, Search, Download, ZoomIn } from 'lucide-react';
 
 // Função utilitária para calcular a Distância de Levenshtein (Fuzzy Matching)
 const getLevenshteinDistance = (a, b) => {
@@ -59,8 +59,11 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
   const [destinoManual, setDestinoManual] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   
-  // Controle de Câmera
+  // Controle de Câmera e Zoom
   const [isCameraActive, setIsCameraActive] = useState(false);
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [zoomCapabilities, setZoomCapabilities] = useState(null);
+  
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
@@ -81,9 +84,30 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
       });
       streamRef.current = stream;
       if (videoRef.current) videoRef.current.srcObject = stream;
+
+      // Verifica se o aparelho suporta Zoom Nativo pela API
+      const track = stream.getVideoTracks()[0];
+      const capabilities = track.getCapabilities();
+      if (capabilities.zoom) {
+        setZoomCapabilities({
+          min: capabilities.zoom.min,
+          max: capabilities.zoom.max,
+          step: capabilities.zoom.step
+        });
+        setZoomLevel(capabilities.zoom.min);
+      }
     } catch (error) {
       alert("Não foi possível abrir a câmera. Certifique-se de dar permissão ou use a Galeria.");
       setIsCameraActive(false);
+    }
+  };
+
+  const handleZoom = async (e) => {
+    const val = Number(e.target.value);
+    setZoomLevel(val);
+    if (streamRef.current) {
+      const track = streamRef.current.getVideoTracks()[0];
+      await track.applyConstraints({ advanced: [{ zoom: val }] });
     }
   };
 
@@ -93,6 +117,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
       streamRef.current = null;
     }
     setIsCameraActive(false);
+    setZoomCapabilities(null);
   };
 
   const takePhoto = () => {
@@ -138,6 +163,16 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
     runVisionOCR(base64Image); 
   };
 
+  const baixarImagem = () => {
+    if (!previewUrl) return;
+    const a = document.createElement('a');
+    a.href = previewUrl;
+    a.download = `StatusDiario_Offline_${Date.now()}.jpg`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
   const setMetadados = (selectedFile = null) => {
     if (dataFoto) return; 
     const dateToUse = selectedFile && selectedFile.lastModified ? new Date(selectedFile.lastModified) : new Date();
@@ -166,7 +201,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
       const originalUpper = detectedText.toUpperCase();
       
       // ==========================================
-      // A) EXTRAÇÃO DO CONTÊINER (Suporte para Horizontal e Vertical)
+      // A) EXTRAÇÃO DO CONTÊINER
       // ==========================================
       let finalContainer = null;
       let cleanText = originalUpper.replace(/[\n\r\s-]/g, '');
@@ -187,8 +222,8 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
             const remainder = originalUpper.substring(matchOriginal.index + matchOriginal[0].length).substring(0, 50);
             let combined = matchOriginal[0] + remainder;
 
-            combined = combined.replace(/\b\d{2}[A-Z][A-Z0-9]\b/g, ''); // Remove ISO Codes
-            combined = combined.replace(/\b(?:TARE|MAX|GROSS|PAYLOAD|NET|WT|LBS|KGS|KG)\s*\d+\b/g, ''); // Remove pesos
+            combined = combined.replace(/\b\d{2}[A-Z][A-Z0-9]\b/g, ''); 
+            combined = combined.replace(/\b(?:TARE|MAX|GROSS|PAYLOAD|NET|WT|LBS|KGS|KG)\s*\d+\b/g, ''); 
 
             let cleanedCombined = combined.replace(/[\n\r\s-]/g, '')
               .replace(/O/g, '0').replace(/I/g, '1').replace(/L/g, '1')
@@ -218,7 +253,6 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
       if (plateMatches && plateMatches.length > 0) {
         const placaEncontrada = plateMatches[0].replace(/[\n\r\s-]/g, '');
         setPlaca(placaEncontrada);
-        // Dispara a busca inteligente com Fuzzy Matching
         buscarDadosVeiculo(placaEncontrada);
       }
 
@@ -232,7 +266,6 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
   // 2. BUSCA NO BANCO + INTELIGÊNCIA FUZZY MATCHING
   const buscarDadosVeiculo = async (placaLida) => {
     try {
-      // Passo A: Tenta o match exato tradicional
       const { data: exactData, error: exactError } = await supabase
         .from('veiculos')
         .select('placa, frota, carreta')
@@ -247,7 +280,6 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
         return;
       }
 
-      // Passo B: Se não achou exato, roda o Fuzzy Matching contra a frota cadastrada
       const { data: frotaCompleta, error: fetchError } = await supabase
         .from('veiculos')
         .select('placa, frota, carreta');
@@ -269,15 +301,10 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
           }
         }
 
-        // Aplica correção se houver apenas 1 ou 2 caracteres divergentes
         if (menorDistancia <= 2 && melhorMatch) {
           setFrota(melhorMatch.frota);
           setPlaca(melhorMatch.placa); 
           setCarreta(melhorMatch.carreta);
-          console.log(`Fuzzy Match: Corrigido com distância ${menorDistancia}. (${placaLida} -> ${melhorMatch.carreta})`);
-        } else {
-          // Mantém o valor original lido caso seja um veículo externo (terceiros)
-          console.log("Veículo externo detectado ou fora do limite Fuzzy. Mantendo leitura original.");
         }
       }
     } catch (error) {
@@ -348,7 +375,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
             <div className="bg-white/20 p-2 rounded-xl"><Truck className="w-5 h-5 text-teal-300" /></div>
             <div>
               <h2 className="text-xl font-black tracking-tight">Registo de Extra</h2>
-              <p className="text-xs text-slate-300 font-medium mt-0.5">Captura Unificada (Contêiner e Placa)</p>
+              <p className="text-xs text-slate-300 font-medium mt-0.5">Captura Unificada Inteligente</p>
             </div>
           </div>
           <button onClick={() => { stopCamera(); onClose(); }} className="p-2 hover:bg-white/10 rounded-full text-slate-300 hover:text-white transition-colors">
@@ -367,7 +394,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
                     <Camera className="w-8 h-8" />
                   </div>
                   <h3 className="text-xl font-bold text-slate-800">Fotografe o Conjunto</h3>
-                  <p className="text-sm text-slate-500 max-w-sm mx-auto">Enquadre o número do contêiner e a placa do veículo em uma única foto usando os guias.</p>
+                  <p className="text-sm text-slate-500 max-w-sm mx-auto">Enquadre o contêiner e a placa livremente. O formato não importa.</p>
 
                   <div className="grid grid-cols-1 gap-4 max-w-md mx-auto w-full">
                     <button type="button" onClick={startCamera} className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl p-5 flex items-center justify-center space-x-3 shadow-md transition-colors">
@@ -386,26 +413,41 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
                   <div className="relative w-full aspect-[3/4] max-w-md bg-black rounded-2xl overflow-hidden shadow-inner">
                     <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
                     
-                    <div className="absolute inset-0 flex flex-col justify-between p-6 pb-12">
-                      <div className="w-full h-[40%] border-4 border-dashed border-yellow-400 rounded-xl bg-yellow-400/20 flex flex-col items-center justify-end pb-4 shadow-[0_0_0_999px_rgba(15,23,42,0.4)]">
-                        <span className="text-white text-[10px] font-black tracking-widest uppercase bg-slate-900/80 px-3 py-1.5 rounded-full shadow-lg">
-                          Alinhe o Contêiner Aqui
-                        </span>
-                      </div>
-                      
-                      <div className="flex-1"></div>
-
-                      <div className="w-full h-[25%] border-4 border-dashed border-blue-400 rounded-xl bg-blue-500/20 flex flex-col items-center justify-end pb-3">
-                        <span className="text-white text-[10px] font-black tracking-widest uppercase bg-slate-900/80 px-3 py-1.5 rounded-full shadow-lg">
-                          Alinhe a Placa Aqui
-                        </span>
+                    {/* NOVO: Guia de Scanner Livre (Bordas ao invés de Caixas) */}
+                    <div className="absolute inset-0 pointer-events-none">
+                      <div className="w-full h-full border-[40px] border-black/50 relative">
+                        {/* Cantoneiras Estilo Scanner */}
+                        <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-teal-400"></div>
+                        <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-teal-400"></div>
+                        <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-teal-400"></div>
+                        <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-teal-400"></div>
+                        
+                        <p className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-white/80 font-black text-xs text-center w-full px-4 tracking-widest uppercase">
+                          Enquadre os textos aqui
+                        </p>
                       </div>
                     </div>
+
+                    {/* NOVO: Controle de Zoom em Glassmorphism */}
+                    {zoomCapabilities && (
+                      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-[80%] flex items-center space-x-3 bg-slate-900/40 p-3 rounded-full backdrop-blur-md border border-white/10 shadow-xl">
+                        <ZoomIn className="w-5 h-5 text-white shrink-0" />
+                        <input
+                          type="range"
+                          min={zoomCapabilities.min}
+                          max={zoomCapabilities.max}
+                          step={zoomCapabilities.step}
+                          value={zoomLevel}
+                          onChange={handleZoom}
+                          className="w-full h-1 bg-white/30 rounded-lg appearance-none cursor-pointer accent-teal-400"
+                        />
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex items-center space-x-4 w-full max-w-md">
                     <button type="button" onClick={stopCamera} className="flex-1 bg-white border border-slate-300 text-slate-700 py-3.5 rounded-xl font-bold hover:bg-slate-50 transition-colors">Cancelar</button>
-                    <button type="button" onClick={takePhoto} className="flex-1 bg-indigo-600 text-white py-3.5 rounded-xl font-bold hover:bg-indigo-700 shadow-md transition-colors">Capturar Foto Única</button>
+                    <button type="button" onClick={takePhoto} className="flex-1 bg-indigo-600 text-white py-3.5 rounded-xl font-bold hover:bg-indigo-700 shadow-md transition-colors">Capturar Foto</button>
                   </div>
                 </div>
               )}
@@ -437,8 +479,16 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
                 )}
                 
                 <div className="flex flex-col sm:flex-row gap-5">
-                  <div className="w-full sm:w-1/3 aspect-[3/4] bg-slate-100 rounded-xl overflow-hidden border border-slate-200 shrink-0">
-                    {previewUrl ? <img src={previewUrl} alt="Captura" className="w-full h-full object-cover" /> : <div className="flex items-center justify-center h-full text-slate-400 text-xs font-bold">Sem foto</div>}
+                  <div className="w-full sm:w-1/3 flex flex-col space-y-2 shrink-0">
+                    <div className="aspect-[3/4] bg-slate-100 rounded-xl overflow-hidden border border-slate-200">
+                      {previewUrl ? <img src={previewUrl} alt="Captura" className="w-full h-full object-cover" /> : <div className="flex items-center justify-center h-full text-slate-400 text-xs font-bold">Sem foto</div>}
+                    </div>
+                    {/* NOVO: Botão Salvar Imagem */}
+                    {previewUrl && (
+                      <button type="button" onClick={baixarImagem} className="w-full flex items-center justify-center bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-lg text-xs font-bold transition-colors border border-slate-200">
+                        <Download className="w-4 h-4 mr-1.5" /> Salvar no Celular
+                      </button>
+                    )}
                   </div>
 
                   <div className="flex-1 flex flex-col justify-center space-y-3">
@@ -477,52 +527,4 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
                 <div>
                   <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Operação</label>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    {operacoesExtra.map(op => (
-                      <button key={op} type="button" onClick={() => setTipoOperacao(op)} className={`p-3 text-[11px] font-bold rounded-xl border transition-all ${tipoOperacao === op ? 'bg-slate-800 text-white shadow-md border-slate-800' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>{op}</button>
-                    ))}
-                  </div>
-                  {tipoOperacao === 'OUTRO' && (
-                    <input type="text" required value={outroOperacao} onChange={e => setOutroOperacao(e.target.value)} placeholder="Especifique a operação..." className="w-full mt-3 bg-slate-50 rounded-xl p-3 text-sm border outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
-                  )}
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Origem</label>
-                    <select value={origemSelect} onChange={e => setOrigemSelect(e.target.value)} required className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm font-bold outline-none mb-2 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                      <option value="" disabled>Selecione...</option>
-                      {locaisPadrao.map(loc => <option key={loc} value={loc}>{loc}</option>)}
-                    </select>
-                    {origemSelect === 'DIGITAR MANUALMENTE' && (
-                      <input type="text" required value={origemManual} onChange={e => setOrigemManual(e.target.value)} placeholder="Digite a origem..." className="w-full bg-slate-50 border-slate-200 rounded-xl p-3 text-sm outline-none border focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">
-                      Destino {isDestinoBloqueado && <span className="text-indigo-500">(Automático)</span>}
-                    </label>
-                    <select value={isDestinoBloqueado ? origemSelect : destinoSelect} onChange={e => setDestinoSelect(e.target.value)} disabled={isDestinoBloqueado || (!origemSelect && isDestinoBloqueado)} required className={`w-full border rounded-xl p-3 text-sm font-bold outline-none mb-2 ${isDestinoBloqueado ? 'bg-slate-200 text-slate-500 border-slate-300 cursor-not-allowed' : 'bg-slate-50 border-slate-200 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500'}`}>
-                      <option value="" disabled>Selecione...</option>
-                      {locaisPadrao.map(loc => <option key={loc} value={loc}>{loc}</option>)}
-                    </select>
-                    {destinoSelect === 'DIGITAR MANUALMENTE' && !isDestinoBloqueado && (
-                      <input type="text" required value={destinoManual} onChange={e => setDestinoManual(e.target.value)} placeholder="Digite o destino..." className="w-full bg-slate-50 border-slate-200 rounded-xl p-3 text-sm outline-none border focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setStep(1)} className="px-6 py-4 text-slate-500 bg-white border border-slate-200 hover:bg-slate-50 rounded-2xl font-bold transition-colors">Voltar</button>
-                <button type="submit" disabled={isSubmitting || isVisionLoading || !tipoOperacao} className="flex-1 bg-gradient-to-r from-indigo-600 to-indigo-500 text-white py-4 rounded-2xl font-bold shadow-md hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center">
-                  {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <>Submeter Viagem <ArrowRight className="w-5 h-5 ml-2" /></>}
-                </button>
-              </div>
-            </form>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
+                    {
