@@ -1,6 +1,30 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Camera, Image as ImageIcon, CheckCircle, AlertCircle, Loader2, XCircle, ArrowRight, Truck, Search } from 'lucide-react';
 
+// Função utilitária para calcular a Distância de Levenshtein (Fuzzy Matching)
+const getLevenshteinDistance = (a, b) => {
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  const matrix = [];
+  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+  
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1, // Substituição
+          matrix[i][j - 1] + 1,     // Inserção
+          matrix[i - 1][j] + 1      // Deleção
+        );
+      }
+    }
+  }
+  return matrix[b.length][a.length];
+};
+
 export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase }) {
   // Passos: 1 = Câmera Unificada, 2 = Formulário/Processamento
   const [step, setStep] = useState(1);
@@ -41,7 +65,6 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
   
-  // Apenas a chave do Google Cloud é necessária agora
   const GOOGLE_VISION_API_KEY = import.meta.env.VITE_GOOGLE_VISION_API_KEY;
 
   useEffect(() => {
@@ -112,7 +135,6 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
     stopCamera();
     setStep(2); 
 
-    // Dispara a IA do Google Vision para ler TUDO de uma vez
     runVisionOCR(base64Image); 
   };
 
@@ -123,7 +145,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
     setHoraFoto(dateToUse.toTimeString().split(' ')[0].substring(0, 5));
   };
 
-  // 1. GOOGLE VISION (Contêiner e Placa simultâneos)
+  // 1. GOOGLE VISION (Contêiner Vertical e Placa Simultâneos)
   const runVisionOCR = async (base64Image) => {
     setIsVisionLoading(true);
     try {
@@ -141,47 +163,62 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
 
       if (!detectedText) throw new Error('Sem texto na imagem');
 
-      // Guardamos o texto original em maiúsculas (com espaços e hífens intactos)
       const originalUpper = detectedText.toUpperCase();
       
-      // Criamos a versão espremida apenas para buscar o contêiner
-      let cleanText = originalUpper.replace(/[\n\r\s-]/g, '');
-      
       // ==========================================
-      // A) EXTRAÇÃO DO CONTÊINER (Usa o texto espremido)
+      // A) EXTRAÇÃO DO CONTÊINER (Suporte para Horizontal e Vertical)
       // ==========================================
       let finalContainer = null;
+      let cleanText = originalUpper.replace(/[\n\r\s-]/g, '');
       const perfectMatch = cleanText.match(/[A-Z]{4}\d{7}/);
-      
+
       if (perfectMatch) {
         finalContainer = perfectMatch[0];
       } else {
-        const prefixMatch = cleanText.match(/[A-Z]{3}[UJZ]/); 
+        const soLetras = cleanText.replace(/[^A-Z]/g, '');
+        const prefixMatch = soLetras.match(/[A-Z]{3}[UJZ]/);
+
         if (prefixMatch) {
           const prefix = prefixMatch[0];
-          let remainder = cleanText.substring(cleanText.indexOf(prefix) + 4)
-            .replace(/O/g, '0').replace(/I/g, '1').replace(/L/g, '1')
-            .replace(/S/g, '5').replace(/B/g, '8').replace(/Z/g, '2');
-          const numbersMatch = remainder.match(/\d{7}/);
-          if (numbersMatch) finalContainer = prefix + numbersMatch[0];
+          const regexPrefix = new RegExp(prefix.split('').join('[\\s\\n\\r-]*'));
+          const matchOriginal = originalUpper.match(regexPrefix);
+
+          if (matchOriginal) {
+            const remainder = originalUpper.substring(matchOriginal.index + matchOriginal[0].length).substring(0, 50);
+            let combined = matchOriginal[0] + remainder;
+
+            combined = combined.replace(/\b\d{2}[A-Z][A-Z0-9]\b/g, ''); // Remove ISO Codes
+            combined = combined.replace(/\b(?:TARE|MAX|GROSS|PAYLOAD|NET|WT|LBS|KGS|KG)\s*\d+\b/g, ''); // Remove pesos
+
+            let cleanedCombined = combined.replace(/[\n\r\s-]/g, '')
+              .replace(/O/g, '0').replace(/I/g, '1').replace(/L/g, '1')
+              .replace(/S/g, '5').replace(/B/g, '8').replace(/Z/g, '2');
+
+            const numbersMatch = cleanedCombined.match(/\d{7}/);
+            if (numbersMatch) {
+              finalContainer = prefix + numbersMatch[0];
+            } else {
+              const justNumbers = cleanedCombined.replace(/[^\d]/g, '');
+              if (justNumbers.length >= 7) {
+                finalContainer = prefix + justNumbers.slice(0, 7);
+              }
+            }
+          }
         }
       }
+      
       if (finalContainer) setContainer(finalContainer);
 
       // ==========================================
-      // B) EXTRAÇÃO DA PLACA (Usa o texto original)
+      // B) EXTRAÇÃO DA PLACA
       // ==========================================
-      // \b       -> Garante que é uma palavra isolada (ignora o ACU do UACU)
-      // \s*-?\s* -> Permite espaços vazios ou hífens opcionais entre as letras e números (ex: GIF - 5903)
       const plateRegex = /\b[A-Z]{3}\s*-?\s*[0-9][A-Z0-9][0-9]{2}\b/g;
-      
       const plateMatches = originalUpper.match(plateRegex);
 
       if (plateMatches && plateMatches.length > 0) {
-        // Pega a primeira placa encontrada, mas agora removemos os espaços e hífens 
-        // para salvar no banco de dados limpinho (ex: GIF5903)
         const placaEncontrada = plateMatches[0].replace(/[\n\r\s-]/g, '');
         setPlaca(placaEncontrada);
+        // Dispara a busca inteligente com Fuzzy Matching
         buscarDadosVeiculo(placaEncontrada);
       }
 
@@ -192,25 +229,59 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
     }
   };
 
-  // 2. BUSCA SUPABASE (Frota)
-  const buscarDadosVeiculo = async (carretaBuscada) => {
+  // 2. BUSCA NO BANCO + INTELIGÊNCIA FUZZY MATCHING
+  const buscarDadosVeiculo = async (placaLida) => {
     try {
-      const { data, error } = await supabase
+      // Passo A: Tenta o match exato tradicional
+      const { data: exactData, error: exactError } = await supabase
         .from('veiculos')
         .select('placa, frota, carreta')
-        .ilike('carreta', `%${carretaBuscada.substring(0,3)}%${carretaBuscada.substring(3)}%`)
-        .limit(1)
-        .single();
-        
-      if (error) throw error;
+        .or(`carreta.ilike.%${placaLida}%,placa.ilike.%${placaLida}%`)
+        .limit(1);
 
-      if (data) {
-        setFrota(data.frota);
-        setPlaca(data.placa); 
-        setCarreta(data.carreta); 
+      if (!exactError && exactData && exactData.length > 0) {
+        const v = exactData[0];
+        setFrota(v.frota);
+        setPlaca(v.placa); 
+        setCarreta(v.carreta);
+        return;
+      }
+
+      // Passo B: Se não achou exato, roda o Fuzzy Matching contra a frota cadastrada
+      const { data: frotaCompleta, error: fetchError } = await supabase
+        .from('veiculos')
+        .select('placa, frota, carreta');
+
+      if (fetchError) throw fetchError;
+
+      if (frotaCompleta && frotaCompleta.length > 0) {
+        let melhorMatch = null;
+        let menorDistancia = 999;
+
+        for (const veiculo of frotaCompleta) {
+          const distPlaca = getLevenshteinDistance(placaLida, veiculo.placa || '');
+          const distCarreta = getLevenshteinDistance(placaLida, veiculo.carreta || '');
+          const distMinima = Math.min(distPlaca, distCarreta);
+
+          if (distMinima < menorDistancia) {
+            menorDistancia = distMinima;
+            melhorMatch = veiculo;
+          }
+        }
+
+        // Aplica correção se houver apenas 1 ou 2 caracteres divergentes
+        if (menorDistancia <= 2 && melhorMatch) {
+          setFrota(melhorMatch.frota);
+          setPlaca(melhorMatch.placa); 
+          setCarreta(melhorMatch.carreta);
+          console.log(`Fuzzy Match: Corrigido com distância ${menorDistancia}. (${placaLida} -> ${melhorMatch.carreta})`);
+        } else {
+          // Mantém o valor original lido caso seja um veículo externo (terceiros)
+          console.log("Veículo externo detectado ou fora do limite Fuzzy. Mantendo leitura original.");
+        }
       }
     } catch (error) {
-      console.log("Placa lida pela IA, mas não encontrada no banco de dados.", error);
+      console.log("Erro ao processar validação de frota por aproximação:", error);
     }
   };
 
@@ -221,7 +292,6 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
     try {
       let urlUnica = null;
 
-      // Upload da Foto Única
       if (file) {
         const ext = file.name.split('.').pop() || 'jpg';
         const name = `foto-dupla-${currentUser.id}-${Date.now()}.${ext}`;
@@ -229,11 +299,10 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
         if (!error) urlUnica = supabase.storage.from('comprovantes').getPublicUrl(name).data.publicUrl;
       }
 
-      const origemFinal = origemSelect === 'DIGITAR MANUALMENTE' ? origemManual : origemSelect;
+      const起源Final = origemSelect === 'DIGITAR MANUALMENTE' ? origemManual : origemSelect;
       let destinoFinal = destinoSelect === 'DIGITAR MANUALMENTE' ? destinoManual : destinoSelect;
       
       if (tipoOperacao === 'REMOÇÃO' || tipoOperacao === 'PESAGEM') destinoFinal = origemFinal;
-
       const operacaoFinal = tipoOperacao === 'OUTRO' ? outroOperacao.toUpperCase() : tipoOperacao;
       
       const viagemData = {
@@ -317,19 +386,15 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
                   <div className="relative w-full aspect-[3/4] max-w-md bg-black rounded-2xl overflow-hidden shadow-inner">
                     <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
                     
-                    {/* GUIAS VISUAIS - ESTILO DESIGN SOLICITADO */}
                     <div className="absolute inset-0 flex flex-col justify-between p-6 pb-12">
-                      {/* Guia Amarelo (Contêiner) */}
                       <div className="w-full h-[40%] border-4 border-dashed border-yellow-400 rounded-xl bg-yellow-400/20 flex flex-col items-center justify-end pb-4 shadow-[0_0_0_999px_rgba(15,23,42,0.4)]">
                         <span className="text-white text-[10px] font-black tracking-widest uppercase bg-slate-900/80 px-3 py-1.5 rounded-full shadow-lg">
                           Alinhe o Contêiner Aqui
                         </span>
                       </div>
                       
-                      {/* Espaçador */}
                       <div className="flex-1"></div>
 
-                      {/* Guia Azul (Placa) */}
                       <div className="w-full h-[25%] border-4 border-dashed border-blue-400 rounded-xl bg-blue-500/20 flex flex-col items-center justify-end pb-3">
                         <span className="text-white text-[10px] font-black tracking-widest uppercase bg-slate-900/80 px-3 py-1.5 rounded-full shadow-lg">
                           Alinhe a Placa Aqui
@@ -364,7 +429,6 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
                 </div>
               )}
 
-              {/* Box de IA e Previews */}
               <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
                 {isVisionLoading && (
                   <div className="flex items-center text-indigo-600 font-bold text-sm bg-indigo-50 p-3 rounded-xl border border-indigo-100">
@@ -373,20 +437,16 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
                 )}
                 
                 <div className="flex flex-col sm:flex-row gap-5">
-                  {/* Imagem Única */}
                   <div className="w-full sm:w-1/3 aspect-[3/4] bg-slate-100 rounded-xl overflow-hidden border border-slate-200 shrink-0">
                     {previewUrl ? <img src={previewUrl} alt="Captura" className="w-full h-full object-cover" /> : <div className="flex items-center justify-center h-full text-slate-400 text-xs font-bold">Sem foto</div>}
                   </div>
 
-                  {/* Resultados Lado a Lado */}
                   <div className="flex-1 flex flex-col justify-center space-y-3">
-                    {/* Bloco Contêiner */}
                     <div className={`p-3 rounded-xl border ${container ? 'bg-yellow-50 border-yellow-200' : 'bg-slate-50 border-slate-200'}`}>
                       <span className="text-[10px] font-black text-slate-400 block uppercase tracking-wider mb-0.5">Leitura do Contêiner</span>
                       <span className={`text-lg font-black tracking-wider ${!container && 'text-slate-400'}`}>{container || (isVisionLoading ? 'Analisando...' : 'NÃO LIDO')}</span>
                     </div>
 
-                    {/* Bloco Placa */}
                     <div className={`p-3 rounded-xl border ${placa ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-200'}`}>
                       <span className="text-[10px] font-black text-slate-400 block uppercase tracking-wider mb-0.5">Leitura da Placa</span>
                       <span className={`text-lg font-black tracking-wider ${!placa && 'text-slate-400'}`}>{placa || (isVisionLoading ? 'Analisando...' : 'NÃO LIDA')}</span>
