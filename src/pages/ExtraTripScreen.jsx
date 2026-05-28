@@ -85,7 +85,6 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
       streamRef.current = stream;
       if (videoRef.current) videoRef.current.srcObject = stream;
 
-      // Verifica se o aparelho suporta Zoom Nativo pela API
       const track = stream.getVideoTracks()[0];
       const capabilities = track.getCapabilities();
       if (capabilities.zoom) {
@@ -180,7 +179,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
     setHoraFoto(dateToUse.toTimeString().split(' ')[0].substring(0, 5));
   };
 
-  // 1. GOOGLE VISION (Cérebro do OCR)
+  // 1. GOOGLE VISION (Cérebro do OCR) - OTIMIZADO PARA VERTICAL
   const runVisionOCR = async (base64Image) => {
     setIsVisionLoading(true);
     try {
@@ -188,7 +187,11 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          requests: [{ image: { content: base64Image }, features: [{ type: 'TEXT_DETECTION' }] }]
+          requests: [{ 
+            image: { content: base64Image }, 
+            // O uso de DOCUMENT_TEXT_DETECTION é vital para ler contêineres na vertical e separar colunas
+            features: [{ type: 'DOCUMENT_TEXT_DETECTION' }] 
+          }]
         })
       });
 
@@ -201,57 +204,35 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
       const originalUpper = detectedText.toUpperCase();
       
       // ==========================================
-      // A) EXTRAÇÃO DO CONTÊINER (Resistente à Vertical/Horizontal)
+      // A) EXTRAÇÃO DO CONTÊINER OTIMIZADA
       // ==========================================
       let finalContainer = null;
+      
+      // Removemos todos os espaços e quebras para juntar o texto vertical em uma única string coesa
       let cleanText = originalUpper.replace(/[\n\r\s-]/g, '');
-      const perfectMatch = cleanText.match(/[A-Z]{4}\d{7}/);
+      
+      // Regex que procura o padrão ISO estrito: 
+      // 4 letras (onde a última é U, J ou Z) seguidas de 7 dígitos (ou letras que parecem dígitos)
+      const containerRegex = /([A-Z]{3}[UJZ])([0-9OILSBZQ]{7})/g;
+      const matches = [...cleanText.matchAll(containerRegex)];
 
-      if (perfectMatch) {
-        // Leu perfeitamente na horizontal
-        finalContainer = perfectMatch[0];
-      } else {
-        // Leu na vertical ou bagunçado
-        const soLetras = cleanText.replace(/[^A-Z]/g, '');
-        const prefixMatch = soLetras.match(/[A-Z]{3}[UJZ]/);
+      if (matches.length > 0) {
+        // Pegamos a primeira ocorrência válida
+        const prefixo = matches[0][1];
+        let numeros = matches[0][2];
 
-        if (prefixMatch) {
-          const prefix = prefixMatch[0];
-          
-          // Cria uma busca que aceita qualquer "lixo" ou número entre as letras do prefixo
-          const regexStr = prefix.split('').join('[^A-Z]*');
-          const interleavedRegex = new RegExp(regexStr);
-          const matchInterleaved = cleanText.match(interleavedRegex);
+        // Limpamos confusões típicas de OCR EXCLUSIVAMENTE na parte dos números
+        // Isso impede que as letras do prefixo sejam afetadas.
+        numeros = numeros
+          .replace(/O/g, '0')
+          .replace(/Q/g, '0')
+          .replace(/I/g, '1')
+          .replace(/L/g, '1')
+          .replace(/Z/g, '2')
+          .replace(/S/g, '5')
+          .replace(/B/g, '8');
 
-          if (matchInterleaved) {
-            const startIndex = matchInterleaved.index;
-            // Pega o bloco todo (letras + números intercalados + números finais)
-            let block = cleanText.substring(startIndex, startIndex + 35);
-
-            // Remove códigos ISO que podem estar colados (ex: 22G1, 45R1)
-            block = block.replace(/\d{2}[A-Z][A-Z0-9]/g, ''); 
-            // Remove palavras de peso que podem ter grudado
-            block = block.replace(/(TARE|MAX|GROSS|PAYLOAD|NET|WT|LBS|KGS|KG)\d+/g, ''); 
-
-            // Remove as exatas 4 letras do prefixo para sobrar apenas os números
-            let digitsAndNoise = block;
-            for (let i = 0; i < 4; i++) {
-              digitsAndNoise = digitsAndNoise.replace(prefix[i], '');
-            }
-
-            // Arruma confusões clássicas do OCR nas letras que sobraram
-            let cleanedDigits = digitsAndNoise
-              .replace(/O/g, '0').replace(/I/g, '1').replace(/L/g, '1')
-              .replace(/S/g, '5').replace(/B/g, '8').replace(/Z/g, '2');
-
-            // Puxa apenas os números
-            const justNumbers = cleanedDigits.replace(/[^\d]/g, '');
-            
-            if (justNumbers.length >= 7) {
-              finalContainer = prefix + justNumbers.substring(0, 7);
-            }
-          }
-        }
+        finalContainer = prefixo + numeros;
       }
       
       if (finalContainer) setContainer(finalContainer);
@@ -425,10 +406,9 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
                   <div className="relative w-full aspect-[3/4] max-w-md bg-black rounded-2xl overflow-hidden shadow-inner">
                     <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
                     
-                    {/* NOVO: Guia de Scanner Livre (Bordas ao invés de Caixas) */}
+                    {/* Guia de Scanner Livre */}
                     <div className="absolute inset-0 pointer-events-none">
                       <div className="w-full h-full border-[40px] border-black/50 relative">
-                        {/* Cantoneiras Estilo Scanner */}
                         <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-teal-400"></div>
                         <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-teal-400"></div>
                         <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-teal-400"></div>
@@ -440,7 +420,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
                       </div>
                     </div>
 
-                    {/* NOVO: Controle de Zoom em Glassmorphism */}
+                    {/* Controle de Zoom */}
                     {zoomCapabilities && (
                       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-[80%] flex items-center space-x-3 bg-slate-900/40 p-3 rounded-full backdrop-blur-md border border-white/10 shadow-xl pointer-events-auto">
                         <ZoomIn className="w-5 h-5 text-white shrink-0" />
@@ -495,7 +475,6 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
                     <div className="aspect-[3/4] bg-slate-100 rounded-xl overflow-hidden border border-slate-200">
                       {previewUrl ? <img src={previewUrl} alt="Captura" className="w-full h-full object-cover" /> : <div className="flex items-center justify-center h-full text-slate-400 text-xs font-bold">Sem foto</div>}
                     </div>
-                    {/* NOVO: Botão Salvar Imagem */}
                     {previewUrl && (
                       <button type="button" onClick={baixarImagem} className="w-full flex items-center justify-center bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-lg text-xs font-bold transition-colors border border-slate-200">
                         <Download className="w-4 h-4 mr-1.5" /> Salvar no Celular
@@ -545,7 +524,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
                   </div>
                   {tipoOperacao === 'OUTRO' && (
                     <input type="text" required value={outroOperacao} onChange={e => setOutroOperacao(e.target.value)} placeholder="Especifique a operação..." className="w-full mt-3 bg-slate-50 rounded-xl p-3 text-sm border outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
-                  )}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
