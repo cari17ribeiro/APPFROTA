@@ -7,7 +7,11 @@ import ValidacaoExtrasScreen from './pages/ValidacaoExtrasScreen.jsx';
 import { supabase } from './lib/supabase.js';
 
 export default function App() {
-  const [currentUser, setCurrentUser] = useState(null); 
+  const [currentUser, setCurrentUser] = useState(() => {
+    const usuarioSalvo = localStorage.getItem('statusDiario_User');
+    return usuarioSalvo ? JSON.parse(usuarioSalvo) : null;
+  }); 
+
   const [viagens, setViagens] = useState([]);
   const [pendentes, setPendentes] = useState([]);
   const [resumos, setResumos] = useState([]);
@@ -17,49 +21,29 @@ export default function App() {
   const [ultimaAtualizacao, setUltimaAtualizacao] = useState(null);
   const [isLoadingData, setIsLoadingData] = useState(false);
 
-  // ==========================================
-  // NOVO: GERENCIAMENTO DE SESSÃO PERSISTENTE
-  // ==========================================
+
+ 
   useEffect(() => {
-    // 1. Função para buscar os dados completos do motorista no banco
-    const fetchUserProfile = async (userId) => {
-      try {
-        const { data, error } = await supabase
-          .from('users') // <-- IMPORTANTE: Coloque o nome da tabela que você usa para perfis (users, usuarios, etc)
-          .select('*')
-          .eq('id', userId)
-          .single();
-          
-        if (data) {
-          setCurrentUser(data); 
-        }
-      } catch (error) {
-        console.error("Erro ao buscar perfil:", error);
-      }
-    };
+    if (currentUser) {
+      localStorage.setItem('statusDiario_User', JSON.stringify(currentUser));
+    } else {
+      localStorage.removeItem('statusDiario_User');
+    }
+  }, [currentUser]);
 
-    // 2. Quando o app abre, verifica se já tem alguém logado salvo no navegador
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        // Se já tem um token salvo, busca os dados daquele usuário
-        fetchUserProfile(session.user.id);
-      }
-    });
-
-    // 3. Fica escutando mudanças (Login ou Logout)
+  
+  useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        fetchUserProfile(session.user.id);
-      } else {
+      // Se o token de segurança vencer no servidor, limpa tudo e desloga sozinho
+      if (!session?.user) {
         setCurrentUser(null);
+        localStorage.removeItem('statusDiario_User');
       }
     });
 
     return () => subscription.unsubscribe();
   }, []);
-  // ==========================================
-
-
+  
   const fetchData = async () => {
     if (!currentUser) return;
 
@@ -107,16 +91,19 @@ export default function App() {
     fetchData();
   }, [currentUser]);
 
-  // NOVO: Função para deslogar do Supabase de verdade, limpando o cache
+  
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setCurrentUser(null);
+    localStorage.removeItem('statusDiario_User');
   };
 
+  
   if (!currentUser) {
     return <LoginScreen onLogin={setCurrentUser} supabase={supabase} />;
   }
 
+  // Controle de rotas baseado no perfil guardado
   if (currentUser.role === 'validador' || currentUser.email === 'validacao@premio.com') {
     return <ValidacaoExtrasScreen supabase={supabase} onLogout={handleLogout} />;
   }
@@ -142,7 +129,6 @@ export default function App() {
                 {currentUser.admin ? 'Fidelidade' : currentUser.motorista}
               </span>
             </div>
-            {/* NOVO: Usamos a função handleLogout aqui */}
             <button 
               onClick={handleLogout}
               className="flex items-center justify-center p-2.5 sm:px-4 sm:py-2 bg-white/10 hover:bg-rose-500 text-white rounded-xl transition-all duration-300 border border-white/20 hover:border-rose-400 shadow-sm"
