@@ -527,4 +527,52 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
                 <div>
                   <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Operação</label>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    {
+                    {operacoesExtra.map(op => (
+                      <button key={op} type="button" onClick={() => setTipoOperacao(op)} className={`p-3 text-[11px] font-bold rounded-xl border transition-all ${tipoOperacao === op ? 'bg-slate-800 text-white shadow-md border-slate-800' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>{op}</button>
+                    ))}
+                  </div>
+                  {tipoOperacao === 'OUTRO' && (
+                    <input type="text" required value={outroOperacao} onChange={e => setOutroOperacao(e.target.value)} placeholder="Especifique a operação..." className="w-full mt-3 bg-slate-50 rounded-xl p-3 text-sm border outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Origem</label>
+                    <select value={origemSelect} onChange={e => setOrigemSelect(e.target.value)} required className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm font-bold outline-none mb-2 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                      <option value="" disabled>Selecione...</option>
+                      {locaisPadrao.map(loc => <option key={loc} value={loc}>{loc}</option>)}
+                    </select>
+                    {origemSelect === 'DIGITAR MANUALMENTE' && (
+                      <input type="text" required value={origemManual} onChange={e => setOrigemManual(e.target.value)} placeholder="Digite a origem..." className="w-full bg-slate-50 border-slate-200 rounded-xl p-3 text-sm outline-none border focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">
+                      Destino {isDestinoBloqueado && <span className="text-indigo-500">(Automático)</span>}
+                    </label>
+                    <select value={isDestinoBloqueado ? origemSelect : destinoSelect} onChange={e => setDestinoSelect(e.target.value)} disabled={isDestinoBloqueado || (!origemSelect && isDestinoBloqueado)} required className={`w-full border rounded-xl p-3 text-sm font-bold outline-none mb-2 ${isDestinoBloqueado ? 'bg-slate-200 text-slate-500 border-slate-300 cursor-not-allowed' : 'bg-slate-50 border-slate-200 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500'}`}>
+                      <option value="" disabled>Selecione...</option>
+                      {locaisPadrao.map(loc => <option key={loc} value={loc}>{loc}</option>)}
+                    </select>
+                    {destinoSelect === 'DIGITAR MANUALMENTE' && !isDestinoBloqueado && (
+                      <input type="text" required value={destinoManual} onChange={e => setDestinoManual(e.target.value)} placeholder="Digite o destino..." className="w-full bg-slate-50 border-slate-200 rounded-xl p-3 text-sm outline-none border focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setStep(1)} className="px-6 py-4 text-slate-500 bg-white border border-slate-200 hover:bg-slate-50 rounded-2xl font-bold transition-colors">Voltar</button>
+                <button type="submit" disabled={isSubmitting || isVisionLoading || !tipoOperacao} className="flex-1 bg-gradient-to-r from-indigo-600 to-indigo-500 text-white py-4 rounded-2xl font-bold shadow-md hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center">
+                  {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <>Submeter Viagem <ArrowRight className="w-5 h-5 ml-2" /></>}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
