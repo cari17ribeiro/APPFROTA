@@ -180,7 +180,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
     setHoraFoto(dateToUse.toTimeString().split(' ')[0].substring(0, 5));
   };
 
-  // 1. GOOGLE VISION (Contêiner Vertical e Placa Simultâneos)
+  // 1. GOOGLE VISION (Cérebro do OCR)
   const runVisionOCR = async (base64Image) => {
     setIsVisionLoading(true);
     try {
@@ -201,42 +201,54 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
       const originalUpper = detectedText.toUpperCase();
       
       // ==========================================
-      // A) EXTRAÇÃO DO CONTÊINER
+      // A) EXTRAÇÃO DO CONTÊINER (Resistente à Vertical/Horizontal)
       // ==========================================
       let finalContainer = null;
       let cleanText = originalUpper.replace(/[\n\r\s-]/g, '');
       const perfectMatch = cleanText.match(/[A-Z]{4}\d{7}/);
 
       if (perfectMatch) {
+        // Leu perfeitamente na horizontal
         finalContainer = perfectMatch[0];
       } else {
+        // Leu na vertical ou bagunçado
         const soLetras = cleanText.replace(/[^A-Z]/g, '');
         const prefixMatch = soLetras.match(/[A-Z]{3}[UJZ]/);
 
         if (prefixMatch) {
           const prefix = prefixMatch[0];
-          const regexPrefix = new RegExp(prefix.split('').join('[\\s\\n\\r-]*'));
-          const matchOriginal = originalUpper.match(regexPrefix);
+          
+          // Cria uma busca que aceita qualquer "lixo" ou número entre as letras do prefixo
+          const regexStr = prefix.split('').join('[^A-Z]*');
+          const interleavedRegex = new RegExp(regexStr);
+          const matchInterleaved = cleanText.match(interleavedRegex);
 
-          if (matchOriginal) {
-            const remainder = originalUpper.substring(matchOriginal.index + matchOriginal[0].length).substring(0, 50);
-            let combined = matchOriginal[0] + remainder;
+          if (matchInterleaved) {
+            const startIndex = matchInterleaved.index;
+            // Pega o bloco todo (letras + números intercalados + números finais)
+            let block = cleanText.substring(startIndex, startIndex + 35);
 
-            combined = combined.replace(/\b\d{2}[A-Z][A-Z0-9]\b/g, ''); 
-            combined = combined.replace(/\b(?:TARE|MAX|GROSS|PAYLOAD|NET|WT|LBS|KGS|KG)\s*\d+\b/g, ''); 
+            // Remove códigos ISO que podem estar colados (ex: 22G1, 45R1)
+            block = block.replace(/\d{2}[A-Z][A-Z0-9]/g, ''); 
+            // Remove palavras de peso que podem ter grudado
+            block = block.replace(/(TARE|MAX|GROSS|PAYLOAD|NET|WT|LBS|KGS|KG)\d+/g, ''); 
 
-            let cleanedCombined = combined.replace(/[\n\r\s-]/g, '')
+            // Remove as exatas 4 letras do prefixo para sobrar apenas os números
+            let digitsAndNoise = block;
+            for (let i = 0; i < 4; i++) {
+              digitsAndNoise = digitsAndNoise.replace(prefix[i], '');
+            }
+
+            // Arruma confusões clássicas do OCR nas letras que sobraram
+            let cleanedDigits = digitsAndNoise
               .replace(/O/g, '0').replace(/I/g, '1').replace(/L/g, '1')
               .replace(/S/g, '5').replace(/B/g, '8').replace(/Z/g, '2');
 
-            const numbersMatch = cleanedCombined.match(/\d{7}/);
-            if (numbersMatch) {
-              finalContainer = prefix + numbersMatch[0];
-            } else {
-              const justNumbers = cleanedCombined.replace(/[^\d]/g, '');
-              if (justNumbers.length >= 7) {
-                finalContainer = prefix + justNumbers.slice(0, 7);
-              }
+            // Puxa apenas os números
+            const justNumbers = cleanedDigits.replace(/[^\d]/g, '');
+            
+            if (justNumbers.length >= 7) {
+              finalContainer = prefix + justNumbers.substring(0, 7);
             }
           }
         }
@@ -430,7 +442,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
 
                     {/* NOVO: Controle de Zoom em Glassmorphism */}
                     {zoomCapabilities && (
-                      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-[80%] flex items-center space-x-3 bg-slate-900/40 p-3 rounded-full backdrop-blur-md border border-white/10 shadow-xl">
+                      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-[80%] flex items-center space-x-3 bg-slate-900/40 p-3 rounded-full backdrop-blur-md border border-white/10 shadow-xl pointer-events-auto">
                         <ZoomIn className="w-5 h-5 text-white shrink-0" />
                         <input
                           type="range"
