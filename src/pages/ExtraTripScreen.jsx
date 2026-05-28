@@ -299,7 +299,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
         if (!error) urlUnica = supabase.storage.from('comprovantes').getPublicUrl(name).data.publicUrl;
       }
 
-      const起源Final = origemSelect === 'DIGITAR MANUALMENTE' ? origemManual : origemSelect;
+      const origemFinal = origemSelect === 'DIGITAR MANUALMENTE' ? origemManual : origemSelect;
       let destinoFinal = destinoSelect === 'DIGITAR MANUALMENTE' ? destinoManual : destinoSelect;
       
       if (tipoOperacao === 'REMOÇÃO' || tipoOperacao === 'PESAGEM') destinoFinal = origemFinal;
