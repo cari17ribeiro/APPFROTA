@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Camera, Image as ImageIcon, CheckCircle, AlertCircle, Loader2, XCircle, ArrowRight, Truck, Search, ZoomIn, Download } from 'lucide-react';
 
 export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase }) {
-  // Passos: 1 = Câmera Unificada, 2 = Formulário/Processamento
+  // Passos: 1 = Câmera, 2 = Formulário/Processamento
   const [step, setStep] = useState(1);
   
   // Arquivo Único
@@ -15,7 +15,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
   const [dataFoto, setDataFoto] = useState('');
   const [horaFoto, setHoraFoto] = useState('');
   
-  // Estado único do OCR (Google Vision + YOLO)
+  // Estado único do OCR (
   const [isVisionLoading, setIsVisionLoading] = useState(false);
 
   // Dados Extraídos
@@ -45,7 +45,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
   
-  // Chaves de API
+  
   const GOOGLE_VISION_API_KEY = import.meta.env.VITE_GOOGLE_VISION_API_KEY;
   const ROBOFLOW_API_KEY = import.meta.env.VITE_ROBOFLOW_API_KEY;
   const ROBOFLOW_MODEL = import.meta.env.VITE_ROBOFLOW_MODEL;
@@ -172,23 +172,18 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
       img.onload = () => {
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
-        
-        // Verifica se é um recorte vertical (ex: porta do contêiner)
-        // Se a altura for muito maior que a largura, consideramos vertical
         const isVertical = box.height > box.width * 1.5;
 
         if (isVertical) {
-          // Inverte largura e altura do canvas para "deitar" a imagem
           canvas.width = box.height;
           canvas.height = box.width;
           
-          // Move o eixo do canvas para o centro
           ctx.translate(canvas.width / 2, canvas.height / 2);
           
-          // Rotaciona 90 graus anti-horário (deita o texto para a esquerda)
+       
           ctx.rotate(-Math.PI / 2);
           
-          // Desenha a imagem recortada
+          
           const startX = box.x - (box.width / 2);
           const startY = box.y - (box.height / 2);
           
@@ -198,7 +193,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
             -box.width / 2, -box.height / 2, box.width, box.height
           );
         } else {
-          // É a frota do caminhão (horizontal), recorta normal sem girar
+         
           canvas.width = box.width;
           canvas.height = box.height;
           const startX = box.x - (box.width / 2);
@@ -212,13 +207,12 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
     });
   };
 
-  // === FLUXO HÍBRIDO (ROBOFLOW + GOOGLE VISION) ===
+  
   const runHybridOCR = async (base64Image) => {
     setIsVisionLoading(true);
     let imageToProcess = base64Image;
 
     try {
-      // 1. Tenta usar o YOLO (Roboflow) para achar a área exata
       if (ROBOFLOW_API_KEY && ROBOFLOW_MODEL) {
         try {
           const formData = new FormData();
@@ -245,7 +239,6 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
         }
       }
 
-      // 2. Chama o Google Vision (com a imagem recortada ou inteira)
       const response = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${GOOGLE_VISION_API_KEY}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -262,8 +255,6 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
 
       const originalUpper = detectedText.toUpperCase();
       let cleanText = originalUpper.replace(/[\n\r\s-]/g, '');
-      
-      // A) Lógica do Contêiner
       let finalContainer = null;
       const perfectMatch = cleanText.match(/[A-Z]{4}\d{7}/);
       if (perfectMatch) {
@@ -281,13 +272,11 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
       }
       if (finalContainer) setContainer(finalContainer);
 
-      // B) Lógica da Frota (3 Dígitos - Novo Padrão)
-      // Procura por 3 números seguidos que estejam isolados (sem letras em volta)
+      
       const frotaRegex = /(?<!\d)\d{3}(?!\d)/g;
       const frotaMatches = originalUpper.match(frotaRegex);
 
       if (frotaMatches && frotaMatches.length > 0) {
-        // Pega o primeiro grupo de 3 números encontrado
         const numeroFrotaLido = frotaMatches[0];
         buscarDadosVeiculo(numeroFrotaLido);
       }
@@ -299,7 +288,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
     }
   };
 
-  // === BUSCA NO SUPABASE AGORA PELA COLUNA FROTA ===
+ 
   const buscarDadosVeiculo = async (numeroFrotaLido) => {
     try {
       const { data, error } = await supabase
