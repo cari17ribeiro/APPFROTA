@@ -217,72 +217,103 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          requests: [{ image: { content: imageToProcess }, features: [{ type: 'TEXT_DETECTION' }] }]
+          requests: [{ 
+            image: { content: imageToProcess }, 
+            // 💡 ALTERAÇÃO 1: Usando DOCUMENT_TEXT_DETECTION
+            features: [{ type: 'DOCUMENT_TEXT_DETECTION' }] 
+          }]
         })
       });
 
       if (!response.ok) throw new Error('Falha API Vision');
       const data = await response.json();
-      const detectedText = data.responses[0]?.fullTextAnnotation?.text;
+      
+      const annotations = data.responses[0]?.textAnnotations;
+      if (!annotations || annotations.length === 0) throw new Error('Sem texto na imagem');
 
-      if (!detectedText) throw new Error('Sem texto na imagem');
-
-      const originalUpper = detectedText.toUpperCase();
+      const originalUpper = annotations[0].description.toUpperCase();
       let finalContainer = null;
       
       // ==========================================================
-      // A) EXTRAÇÃO DO CONTÊINER (NOVA LÓGICA VERTICAL BLINDADA)
+      // A) EXTRAÇÃO INTELIGENTE (DIVISÃO ESPACIAL PARA VERTICAL)
       // ==========================================================
-      
-      // 1. Achata o texto para 1 linha com espaços, para as palavras não colarem
-      let singleLineText = originalUpper.replace(/[\n\r]/g, ' ');
+      if (annotations.length > 1) {
+        const words = annotations.slice(1); // Ignora o índice 0 (texto agrupado inteiro)
 
-      // 2. Remove blocos de peso ANTES de tirar os espaços (protege o número do contêiner)
-      singleLineText = singleLineText.replace(/\b(?:TARE|MAX|GROSS|PAYLOAD|NET|WT|CU\s*CAP)\b.*?(?:KGS|LBS|KG|LB|CU\s*M|CU\s*FT)\b/g, '');
-      
-      // 3. Remove códigos ISO isolados (Ex: 45R1, 22G1)
-      singleLineText = singleLineText.replace(/\b\d{2}[A-Z][A-Z0-9]\b/g, '');
+        // Acha a largura aproximada da imagem baseada no maior X encontrado
+        const maxX = Math.max(...words.flatMap(w => w.boundingPoly.vertices.map(v => v.x)));
+        const middleX = maxX / 2;
 
-      // 4. Limpeza final: arranca todos os espaços e traços
-      let cleanText = singleLineText.replace(/[\s-]/g, '');
+        // Filtra apenas as letras/números que estão na metade DIREITA da tela
+        const rightWords = words.filter(w => {
+          const minX = Math.min(...w.boundingPoly.vertices.map(v => v.x));
+          return minX > (middleX * 0.7); // Pega o que está da direita pra frente
+        });
 
-      // NÍVEL 1: Busca Horizontal Tradicional Limpa
-      const perfectMatch = cleanText.match(/[A-Z]{4}\d{7}/);
-      
-      if (perfectMatch) {
-        finalContainer = perfectMatch[0];
-      } else {
-        // NÍVEL 2: Tática Vertical (Lida perfeitamente com a frota misturada à esquerda)
-        const soLetras = cleanText.replace(/[^A-Z]/g, '');
-        const prefixMatch = soLetras.match(/[A-Z]{3}[UJZ]/); 
+        // 💡 O TRUQUE DE MESTRE: Ordena esses blocos de CIMA para BAIXO (Coordenada Y)
+        rightWords.sort((a, b) => {
+          const aY = Math.min(...a.boundingPoly.vertices.map(v => v.y));
+          const bY = Math.min(...b.boundingPoly.vertices.map(v => v.y));
+          return aY - bY;
+        });
 
-        if (prefixMatch) {
-          const prefix = prefixMatch[0]; // Ex: HLBU
-          
-          // O ".*?" permite que haja MISTURA de números da frota ENTRE as letras do contêiner
-          const regexStr = prefix.split('').join('.*?');
-          const interleavedRegex = new RegExp(regexStr);
-          const matchInterleaved = cleanText.match(interleavedRegex);
+        // Monta a string do contêiner já na ordem certa
+        let rightText = rightWords.map(w => w.description.toUpperCase()).join('');
+        let cleanRightText = rightText.replace(/[\s-]/g, '');
 
-          if (matchInterleaved) {
-            // O CORTE MÁGICO: Corta a string EXATAMENTE após a última letra do prefixo (ex: U)
-            // Isso joga fora todo o lixo e números que estavam misturados nas letras
-            const textoAposPrefixo = cleanText.substring(matchInterleaved.index + matchInterleaved[0].length);
+        // Previne que letras do prefixo tenham sido lidas como números
+        let prefixoTratado = cleanRightText.substring(0, 4)
+          .replace(/0/g, 'O').replace(/1/g, 'I').replace(/5/g, 'S')
+          .replace(/8/g, 'B').replace(/2/g, 'Z');
 
-            // Analisa apenas os próximos 40 caracteres pra baixo
-            let block = textoAposPrefixo.substring(0, 40);
+        // Previne que números finais tenham sido lidos como letras
+        let serialTratado = cleanRightText.substring(4)
+          .replace(/O/g, '0').replace(/I/g, '1').replace(/L/g, '1')
+          .replace(/S/g, '5').replace(/B/g, '8').replace(/Z/g, '2');
 
-            // Converte confusões visuais clássicas do OCR
-            let cleanedDigits = block
-              .replace(/O/g, '0').replace(/I/g, '1').replace(/L/g, '1')
-              .replace(/S/g, '5').replace(/B/g, '8').replace(/Z/g, '2');
+        const textoCorrigido = prefixoTratado + serialTratado;
+        
+        const spatialMatch = textoCorrigido.match(/[A-Z]{4}\d{7}/);
+        if (spatialMatch) {
+          finalContainer = spatialMatch[0];
+        }
+      }
 
-            // Extermina o que for letra, sobram apenas números puros
-            const justNumbers = cleanedDigits.replace(/[^\d]/g, '');
-            
-            // Pega os 7 primeiros números cravados após as letras
-            if (justNumbers.length >= 7) {
-              finalContainer = prefix + justNumbers.substring(0, 7);
+      // ==========================================================
+      // B) FALLBACK: SUA TÁTICA ORIGINAL (Caso a espacial falhe)
+      // ==========================================================
+      if (!finalContainer) {
+        let singleLineText = originalUpper.replace(/[\n\r]/g, ' ');
+        singleLineText = singleLineText.replace(/\b(?:TARE|MAX|GROSS|PAYLOAD|NET|WT|CU\s*CAP)\b.*?(?:KGS|LBS|KG|LB|CU\s*M|CU\s*FT)\b/g, '');
+        singleLineText = singleLineText.replace(/\b\d{2}[A-Z][A-Z0-9]\b/g, '');
+        
+        let cleanText = singleLineText.replace(/[\s-]/g, '');
+        const perfectMatch = cleanText.match(/[A-Z]{4}\d{7}/);
+        
+        if (perfectMatch) {
+          finalContainer = perfectMatch[0];
+        } else {
+          const soLetras = cleanText.replace(/[^A-Z]/g, '');
+          const prefixMatch = soLetras.match(/[A-Z]{3}[UJZ]/); 
+
+          if (prefixMatch) {
+            const prefix = prefixMatch[0];
+            const regexStr = prefix.split('').join('.*?');
+            const interleavedRegex = new RegExp(regexStr);
+            const matchInterleaved = cleanText.match(interleavedRegex);
+
+            if (matchInterleaved) {
+              const textoAposPrefixo = cleanText.substring(matchInterleaved.index + matchInterleaved[0].length);
+              let block = textoAposPrefixo.substring(0, 40);
+              let cleanedDigits = block
+                .replace(/O/g, '0').replace(/I/g, '1').replace(/L/g, '1')
+                .replace(/S/g, '5').replace(/B/g, '8').replace(/Z/g, '2');
+
+              const justNumbers = cleanedDigits.replace(/[^\d]/g, '');
+              
+              if (justNumbers.length >= 7) {
+                finalContainer = prefix + justNumbers.substring(0, 7);
+              }
             }
           }
         }
@@ -291,7 +322,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
       if (finalContainer) setContainer(finalContainer);
 
       // ==========================================
-      // B) EXTRAÇÃO DA FROTA / PLACA
+      // C) EXTRAÇÃO DA FROTA / PLACA
       // ==========================================
       const frotaRegex = /(?<!\d)\d{3}(?!\d)/g;
       const frotaMatches = originalUpper.match(frotaRegex);
