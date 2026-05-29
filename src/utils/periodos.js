@@ -14,7 +14,7 @@ export const calcularPeriodoViagem = (dataStr) => {
       }
     }
     return `${mes.toString().padStart(2, '0')}/${ano}`;
-  } catch (e) {
+  } catch {
     return '';
   }
 };

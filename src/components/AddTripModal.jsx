@@ -27,7 +27,7 @@ export default function AddTripModal({ currentUser, onClose, onSave, supabase })
         comprovanteUrlFinal = publicUrlData.publicUrl;
       }
       await onSave({ ...formData, comprovante_url: comprovanteUrlFinal });
-    } catch (error) {
+    } catch {
       alert("Falha ao anexar ficheiro. Tente sem ficheiro.");
     } finally {
       setIsUploading(false);

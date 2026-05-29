@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Truck, AlertCircle, Loader2 } from 'lucide-react';
+import { Truck, AlertCircle, Loader2, Eye, EyeOff } from 'lucide-react';
 
 export default function LoginScreen({ onLogin, supabase }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const EMAIL_VALIDADOR = import.meta.env.VITE_EMAIL_VALIDACAO;
@@ -75,14 +76,25 @@ export default function LoginScreen({ onLogin, supabase }) {
 
           <div className="space-y-1.5">
             <label className="block text-sm font-bold text-slate-700 ml-1">Senha</label>
-            <input 
-              type="password" 
-              required
-              className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-2xl px-4 py-3.5 focus:bg-white focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 outline-none transition-all placeholder-slate-400"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
+            <div className="relative">
+              <input 
+                type={showPassword ? 'text' : 'password'} 
+                required
+                className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-2xl px-4 py-3.5 pr-12 focus:bg-white focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 outline-none transition-all placeholder-slate-400"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((visible) => !visible)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-slate-400 hover:text-slate-700 rounded-xl hover:bg-slate-100 transition-colors"
+                aria-label={showPassword ? 'Ocultar senha' : 'Revelar senha'}
+                title={showPassword ? 'Ocultar senha' : 'Revelar senha'}
+              >
+                {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+              </button>
+            </div>
           </div>
 
           <button 

@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import StatusBadge from '../components/StatusBadge';
 
-export default function AdminDashboard({ viagens, setViagens, pendentes, setPendentes, premiosLiberados, setPremiosLiberados, correcoesBloqueadas, setCorrecoesBloqueadas, refreshData, supabase }) {
+export default function AdminDashboard({ viagens, pendentes, setPendentes, premiosLiberados, setPremiosLiberados, correcoesBloqueadas, setCorrecoesBloqueadas, refreshData, supabase }) {
   const [activeTab, setActiveTab] = useState('Em Análise'); 
   const [actionState, setActionState] = useState({ id: null, type: null }); 
   const [actionMessage, setActionMessage] = useState('');
