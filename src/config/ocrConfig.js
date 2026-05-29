@@ -10,6 +10,14 @@ const booleanFromEnv = (value, fallback) => {
   return String(value).toLowerCase() === 'true';
 };
 
+const listFromEnv = (value, fallback) => {
+  if (!value) return fallback;
+  return String(value)
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+};
+
 export const OCR_CONFIG = {
   googleVisionApiKey: env.VITE_GOOGLE_VISION_API_KEY || '',
   roboflowApiKey: env.VITE_ROBOFLOW_API_KEY || '',
@@ -27,6 +35,14 @@ export const OCR_CONFIG = {
   enableSharpen: booleanFromEnv(env.VITE_OCR_ENABLE_SHARPEN, true),
   enableDebug: booleanFromEnv(env.VITE_OCR_DEBUG, false),
   saveDebugCrops: booleanFromEnv(env.VITE_OCR_SAVE_DEBUG_CROPS, false),
-  containerClasses: ['container_code', 'container_code_vertical'],
+  containerClasses: listFromEnv(env.VITE_ROBOFLOW_CONTAINER_CLASSES, [
+    'container_code',
+    'container_code_vertical',
+    'container',
+    'container-code',
+    'codigo_container',
+    'codigo-container',
+    'cod_container',
+  ]),
   plateClasses: ['truck_plate'],
 };

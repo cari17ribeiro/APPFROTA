@@ -23,6 +23,7 @@ export default function ExtraTripScreen({ currentUser, onClose, supabase }) {
   const [frota, setFrota] = useState('');
   const [carreta, setCarreta] = useState('');
   const [ocrResult, setOcrResult] = useState(null);
+  const [containerConfirmed, setContainerConfirmed] = useState(false);
 
   
   const operacoesExtra = ['REMOÇÃO', 'PESAGEM', 'TRANSFERÊNCIA', 'SCANNER - TRA', 'OUTRO'];
@@ -138,6 +139,7 @@ export default function ExtraTripScreen({ currentUser, onClose, supabase }) {
     setFrota('');
     setCarreta('');
     setOcrResult(null);
+    setContainerConfirmed(false);
     setMetadados(mockFile);
     stopCamera();
     setStep(2); 
@@ -170,7 +172,10 @@ export default function ExtraTripScreen({ currentUser, onClose, supabase }) {
       setOcrResult(result);
       if (import.meta.env.VITE_OCR_DEBUG === 'true') console.debug('OCR debug:', result.debug);
 
-      if (result.containerCode) setContainer(result.containerCode);
+      if (result.containerCode) {
+        setContainer(result.containerCode);
+        setContainerConfirmed(false);
+      }
       if (result.plate) setPlaca(result.plate);
       if (result.fleetNumber) buscarDadosVeiculo(result.fleetNumber);
 
@@ -262,6 +267,7 @@ export default function ExtraTripScreen({ currentUser, onClose, supabase }) {
     ).values()
   ).slice(0, 4);
   const containerManualValid = container ? isValidContainerCode(container) : false;
+  const showAmbiguousWarning = ocrResult?.ambiguous && !containerConfirmed;
 
   return (
     <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 sm:p-6 overflow-y-auto">
@@ -409,7 +415,10 @@ export default function ExtraTripScreen({ currentUser, onClose, supabase }) {
                         <input
                           type="text"
                           value={container}
-                          onChange={(e) => setContainer(normalizeOcrText(e.target.value).slice(0, 11))}
+                          onChange={(e) => {
+                            setContainer(normalizeOcrText(e.target.value).slice(0, 11));
+                            setContainerConfirmed(true);
+                          }}
                           placeholder="AAAA0000000"
                           maxLength={11}
                           className={`w-full rounded-lg border px-3 py-2 text-sm font-black tracking-wider outline-none transition-colors ${
@@ -426,7 +435,7 @@ export default function ExtraTripScreen({ currentUser, onClose, supabase }) {
                           </span>
                         )}
                       </div>
-                      {ocrResult?.ambiguous && (
+                      {showAmbiguousWarning && (
                         <div className="mt-2 flex items-start text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
                           <AlertCircle className="w-4 h-4 mr-1.5 mt-0.5 shrink-0" />
                           <span>Leitura ambígua. Confirme uma opção abaixo.</span>
@@ -440,7 +449,10 @@ export default function ExtraTripScreen({ currentUser, onClose, supabase }) {
                               <button
                                 key={candidate.text}
                                 type="button"
-                                onClick={() => setContainer(candidate.text)}
+                                onClick={() => {
+                                  setContainer(candidate.text);
+                                  setContainerConfirmed(true);
+                                }}
                                 className={`text-left rounded-lg border px-3 py-2 transition-colors ${
                                   container === candidate.text
                                     ? 'bg-yellow-100 border-yellow-300 text-slate-900'
@@ -448,9 +460,6 @@ export default function ExtraTripScreen({ currentUser, onClose, supabase }) {
                                 }`}
                               >
                                 <span className="block text-sm font-black tracking-wider">{candidate.text}</span>
-                                <span className="block text-[10px] font-bold text-slate-400">
-                                  Score {Math.round(candidate.score)} · {candidate.candidateSource || candidate.transform}
-                                </span>
                               </button>
                             ))}
                           </div>

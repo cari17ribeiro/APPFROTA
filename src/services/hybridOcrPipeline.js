@@ -17,6 +17,8 @@ const extractFleetNumber = (rawText) => {
   return matches?.[0] || '';
 };
 
+const normalizeClassName = (className) => String(className || '').toLowerCase().trim();
+
 const getBoxFromAnnotation = (annotation) => {
   const vertices = annotation.boundingPoly?.vertices || [];
   const xs = vertices.map((vertex) => vertex.x ?? 0);
@@ -147,8 +149,9 @@ export const runHybridOcrPipeline = async (base64Image, customConfig = {}) => {
     debug.errors.push({ stage: 'vision_full_image', message: error.message });
   }
 
+  const acceptedContainerClasses = config.containerClasses.map(normalizeClassName);
   let containerDetections = (roboflowResult.detections || []).filter((detection) =>
-    config.containerClasses.includes(detection.class)
+    acceptedContainerClasses.includes(normalizeClassName(detection.class))
   )
     .sort((a, b) => b.confidence - a.confidence)
     .slice(0, config.maxContainerDetections || 2);
