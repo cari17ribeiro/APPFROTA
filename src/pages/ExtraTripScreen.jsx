@@ -2,29 +2,26 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Camera, Image as ImageIcon, CheckCircle, AlertCircle, Loader2, XCircle, ArrowRight, Truck, Search, ZoomIn, Download } from 'lucide-react';
 
 export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase }) {
-  // Passos: 1 = Câmera, 2 = Formulário/Processamento
   const [step, setStep] = useState(1);
   
-  // Arquivo Único
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [photoSource, setPhotoSource] = useState(null);
   const [justificativa, setJustificativa] = useState('');
   
-  // Metadados
+  
   const [dataFoto, setDataFoto] = useState('');
   const [horaFoto, setHoraFoto] = useState('');
   
-  // Estado único do OCR
+  
   const [isVisionLoading, setIsVisionLoading] = useState(false);
 
-  // Dados Extraídos
   const [container, setContainer] = useState('');
   const [placa, setPlaca] = useState('');
   const [frota, setFrota] = useState('');
   const [carreta, setCarreta] = useState('');
 
-  // Formulário da Viagem
+  
   const operacoesExtra = ['REMOÇÃO', 'PESAGEM', 'TRANSFERÊNCIA', 'SCANNER - TRA', 'OUTRO'];
   const locaisPadrao = ['CLIA', 'IPA', 'BK', 'DIGITAR MANUALMENTE'];
   const [tipoOperacao, setTipoOperacao] = useState('');
@@ -35,7 +32,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
   const [destinoManual, setDestinoManual] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   
-  // Controle de Câmera e ZOOM
+  
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [maxZoom, setMaxZoom] = useState(1);
@@ -210,8 +207,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
       const originalUpper = annotations[0].description.toUpperCase();
       let finalContainer = null;
       
-      // ==========================================================
-      // A) EXTRAÇÃO INTELIGENTE (DIVISÃO ESPACIAL PARA VERTICAL)
+ 
       // ==========================================================
       if (annotations.length > 1) {
         const words = annotations.slice(1);
@@ -256,8 +252,6 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
       }
 
       // ==========================================================
-      // B) FALLBACK ORIGINAL (Horizontal Clássico)
-      // ==========================================================
       if (!finalContainer) {
         let singleLineText = originalUpper.replace(/[\n\r]/g, ' ');
         singleLineText = singleLineText.replace(/\b(?:TARE|MAX|GROSS|PAYLOAD|NET|WT|CU\s*CAP)\b.*?(?:KGS|LBS|KG|LB|CU\s*M|CU\s*FT)\b/g, '');
@@ -297,8 +291,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
       
       if (finalContainer) setContainer(finalContainer);
 
-      // ==========================================
-      // C) EXTRAÇÃO DA FROTA / PLACA
+      
       // ==========================================
       // Ajustei para procurar a frota de forma mais limpa, pegando conjuntos de 3 a 4 números
       const frotaRegex = /(?<!\d)\d{3,4}(?!\d)/g;
