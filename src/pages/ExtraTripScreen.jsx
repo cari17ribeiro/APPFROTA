@@ -163,22 +163,49 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
     setHoraFoto(dateToUse.toTimeString().split(' ')[0].substring(0, 5));
   };
 
-  // === FUNÇÃO DE RECORTE (FRONTEND) ===
+  // === FUNÇÃO DE RECORTE COM ROTAÇÃO INTELIGENTE (FRONTEND) ===
   const cropImageInBrowser = (base64Image, box) => {
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.src = `data:image/jpeg;base64,${base64Image}`;
+      
       img.onload = () => {
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
-        canvas.width = box.width;
-        canvas.height = box.height;
         
-        // Desloca o x e y baseado no centro retornado pelo YOLO
-        const startX = box.x - (box.width / 2);
-        const startY = box.y - (box.height / 2);
+        // Verifica se é um recorte vertical (ex: porta do contêiner)
+        // Se a altura for muito maior que a largura, consideramos vertical
+        const isVertical = box.height > box.width * 1.5;
 
-        ctx.drawImage(img, startX, startY, box.width, box.height, 0, 0, box.width, box.height);
+        if (isVertical) {
+          // Inverte largura e altura do canvas para "deitar" a imagem
+          canvas.width = box.height;
+          canvas.height = box.width;
+          
+          // Move o eixo do canvas para o centro
+          ctx.translate(canvas.width / 2, canvas.height / 2);
+          
+          // Rotaciona 90 graus anti-horário (deita o texto para a esquerda)
+          ctx.rotate(-Math.PI / 2);
+          
+          // Desenha a imagem recortada
+          const startX = box.x - (box.width / 2);
+          const startY = box.y - (box.height / 2);
+          
+          ctx.drawImage(
+            img, 
+            startX, startY, box.width, box.height, 
+            -box.width / 2, -box.height / 2, box.width, box.height
+          );
+        } else {
+          // É a frota do caminhão (horizontal), recorta normal sem girar
+          canvas.width = box.width;
+          canvas.height = box.height;
+          const startX = box.x - (box.width / 2);
+          const startY = box.y - (box.height / 2);
+          ctx.drawImage(img, startX, startY, box.width, box.height, 0, 0, box.width, box.height);
+        }
+
         resolve(canvas.toDataURL('image/jpeg', 1.0).split(',')[1]);
       };
       img.onerror = reject;
