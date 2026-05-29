@@ -15,7 +15,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
   const [dataFoto, setDataFoto] = useState('');
   const [horaFoto, setHoraFoto] = useState('');
   
-  // Estado único do OCR (
+  // Estado único do OCR
   const [isVisionLoading, setIsVisionLoading] = useState(false);
 
   // Dados Extraídos
@@ -44,7 +44,6 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
-  
   
   const GOOGLE_VISION_API_KEY = import.meta.env.VITE_GOOGLE_VISION_API_KEY;
   const ROBOFLOW_API_KEY = import.meta.env.VITE_ROBOFLOW_API_KEY;
@@ -163,7 +162,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
     setHoraFoto(dateToUse.toTimeString().split(' ')[0].substring(0, 5));
   };
 
-  // === FUNÇÃO DE RECORTE COM ROTAÇÃO INTELIGENTE (FRONTEND) ===
+  // === FUNÇÃO DE RECORTE (FRONTEND) CORRIGIDA ===
   const cropImageInBrowser = (base64Image, box) => {
     return new Promise((resolve, reject) => {
       const img = new Image();
@@ -172,34 +171,16 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
       img.onload = () => {
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
-        const isVertical = box.height > box.width * 1.5;
 
-        if (isVertical) {
-          canvas.width = box.height;
-          canvas.height = box.width;
-          
-          ctx.translate(canvas.width / 2, canvas.height / 2);
-          
-       
-          ctx.rotate(-Math.PI / 2);
-          
-          
-          const startX = box.x - (box.width / 2);
-          const startY = box.y - (box.height / 2);
-          
-          ctx.drawImage(
-            img, 
-            startX, startY, box.width, box.height, 
-            -box.width / 2, -box.height / 2, box.width, box.height
-          );
-        } else {
-         
-          canvas.width = box.width;
-          canvas.height = box.height;
-          const startX = box.x - (box.width / 2);
-          const startY = box.y - (box.height / 2);
-          ctx.drawImage(img, startX, startY, box.width, box.height, 0, 0, box.width, box.height);
-        }
+        // A ROTAÇÃO FOI REMOVIDA DAQUI! 
+        // O Roboflow agora apenas recorta a caixa delimitadora do jeito que ela é.
+        // Rotacionar texto empilhado deitava as letras e quebrava o OCR do Google.
+        canvas.width = box.width;
+        canvas.height = box.height;
+        const startX = box.x - (box.width / 2);
+        const startY = box.y - (box.height / 2);
+        
+        ctx.drawImage(img, startX, startY, box.width, box.height, 0, 0, box.width, box.height);
 
         resolve(canvas.toDataURL('image/jpeg', 1.0).split(',')[1]);
       };
@@ -207,7 +188,6 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
     });
   };
 
-  
   const runHybridOCR = async (base64Image) => {
     setIsVisionLoading(true);
     let imageToProcess = base64Image;
@@ -226,11 +206,9 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
           
           if (roboRes.ok) {
             const predictions = await roboRes.json();
-            // Pega a maior predição (com mais confiança)
             const bestCrop = predictions.predictions?.sort((a, b) => b.confidence - a.confidence)[0];
             
             if (bestCrop) {
-              // Recorta a imagem no navegador antes de mandar pro Google Vision
               imageToProcess = await cropImageInBrowser(base64Image, bestCrop);
             }
           }
@@ -256,23 +234,58 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
       const originalUpper = detectedText.toUpperCase();
       let cleanText = originalUpper.replace(/[\n\r\s-]/g, '');
       let finalContainer = null;
+      
+      // ==========================================
+      // A) EXTRAÇÃO DO CONTÊINER (Agressiva para Vertical)
+      // ==========================================
       const perfectMatch = cleanText.match(/[A-Z]{4}\d{7}/);
+      
       if (perfectMatch) {
         finalContainer = perfectMatch[0];
       } else {
-        const prefixMatch = cleanText.match(/[A-Z]{3}[UJZ]/); 
+        // Tática para Vertical: Lê de cima para baixo ignorando lixo do meio
+        const soLetras = cleanText.replace(/[^A-Z]/g, '');
+        const prefixMatch = soLetras.match(/[A-Z]{3}[UJZ]/); 
+
         if (prefixMatch) {
           const prefix = prefixMatch[0];
-          let remainder = cleanText.substring(cleanText.indexOf(prefix) + 4)
-            .replace(/O/g, '0').replace(/I/g, '1').replace(/L/g, '1')
-            .replace(/S/g, '5').replace(/B/g, '8').replace(/Z/g, '2');
-          const numbersMatch = remainder.match(/\d{7}/);
-          if (numbersMatch) finalContainer = prefix + numbersMatch[0];
+          
+          // Cria regex para achar onde essas letras estão no texto original limpo
+          const regexStr = prefix.split('').join('[^A-Z]*');
+          const interleavedRegex = new RegExp(regexStr);
+          const matchInterleaved = cleanText.match(interleavedRegex);
+
+          if (matchInterleaved) {
+            const startIndex = matchInterleaved.index;
+            // Pega o bloco da primeira letra até uns 40 caracteres pra frente
+            let block = cleanText.substring(startIndex, startIndex + 40);
+
+            // Remove as 4 letras do prefixo encontradas para sobrar apenas números e lixo
+            for (let char of prefix) {
+              block = block.replace(char, '');
+            }
+
+            // O que sobrou converte confusões visuais (O por 0, S por 5, etc)
+            let cleanedDigits = block
+              .replace(/O/g, '0').replace(/I/g, '1').replace(/L/g, '1')
+              .replace(/S/g, '5').replace(/B/g, '8').replace(/Z/g, '2');
+
+            // Extermina tudo que não for número
+            const justNumbers = cleanedDigits.replace(/[^\d]/g, '');
+            
+            // Pega os 7 primeiros números encontrados abaixo das letras!
+            if (justNumbers.length >= 7) {
+              finalContainer = prefix + justNumbers.substring(0, 7);
+            }
+          }
         }
       }
+      
       if (finalContainer) setContainer(finalContainer);
 
-      
+      // ==========================================
+      // B) EXTRAÇÃO DA FROTA / PLACA
+      // ==========================================
       const frotaRegex = /(?<!\d)\d{3}(?!\d)/g;
       const frotaMatches = originalUpper.match(frotaRegex);
 
@@ -288,13 +301,12 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
     }
   };
 
- 
   const buscarDadosVeiculo = async (numeroFrotaLido) => {
     try {
       const { data, error } = await supabase
         .from('veiculos')
         .select('placa, frota, carreta')
-        .eq('frota', numeroFrotaLido) // Busca exata pelos 3 dígitos
+        .eq('frota', numeroFrotaLido) 
         .limit(1)
         .single();
         
