@@ -15,7 +15,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
   const [dataFoto, setDataFoto] = useState('');
   const [horaFoto, setHoraFoto] = useState('');
   
-  // Estado único do OCR (Google Vision)
+  // Estado único do OCR (Google Vision + YOLO)
   const [isVisionLoading, setIsVisionLoading] = useState(false);
 
   // Dados Extraídos
@@ -45,7 +45,11 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
   
+  // Chaves de API
   const GOOGLE_VISION_API_KEY = import.meta.env.VITE_GOOGLE_VISION_API_KEY;
+  const ROBOFLOW_API_KEY = import.meta.env.VITE_ROBOFLOW_API_KEY;
+  const ROBOFLOW_MODEL = import.meta.env.VITE_ROBOFLOW_MODEL;
+  const ROBOFLOW_VERSION = import.meta.env.VITE_ROBOFLOW_VERSION;
 
   useEffect(() => {
     return () => stopCamera();
@@ -62,7 +66,6 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
       streamRef.current = stream;
       if (videoRef.current) videoRef.current.srcObject = stream;
 
-      // === LÓGICA DE ZOOM ADICIONADA ===
       const track = stream.getVideoTracks()[0];
       setTimeout(() => {
         const capabilities = track.getCapabilities();
@@ -71,7 +74,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
           setMaxZoom(capabilities.zoom.max);
           setZoom(capabilities.zoom.min || 1);
         }
-      }, 500); // Timeout leve para dar tempo do hardware responder
+      }, 500); 
       
     } catch (error) {
       alert("Não foi possível abrir a câmera. Certifique-se de dar permissão ou use a Galeria.");
@@ -79,7 +82,6 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
     }
   };
 
-  // === FUNÇÃO PARA APLICAR O ZOOM ===
   const handleZoomChange = (e) => {
     const newZoom = Number(e.target.value);
     setZoom(newZoom);
@@ -141,11 +143,9 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
     stopCamera();
     setStep(2); 
 
-    // O ideal no futuro é enviar isso para a sua API Python com YOLOv8
-    runVisionOCR(base64Image); 
+    runHybridOCR(base64Image); 
   };
 
-  // === FUNÇÃO DE DOWNLOAD OFFLINE ===
   const downloadOfflinePhoto = () => {
     if (!previewUrl) return;
     const link = document.createElement('a');
@@ -163,14 +163,67 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
     setHoraFoto(dateToUse.toTimeString().split(' ')[0].substring(0, 5));
   };
 
-  const runVisionOCR = async (base64Image) => {
+  // === FUNÇÃO DE RECORTE (FRONTEND) ===
+  const cropImageInBrowser = (base64Image, box) => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.src = `data:image/jpeg;base64,${base64Image}`;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = box.width;
+        canvas.height = box.height;
+        
+        // Desloca o x e y baseado no centro retornado pelo YOLO
+        const startX = box.x - (box.width / 2);
+        const startY = box.y - (box.height / 2);
+
+        ctx.drawImage(img, startX, startY, box.width, box.height, 0, 0, box.width, box.height);
+        resolve(canvas.toDataURL('image/jpeg', 1.0).split(',')[1]);
+      };
+      img.onerror = reject;
+    });
+  };
+
+  // === FLUXO HÍBRIDO (ROBOFLOW + GOOGLE VISION) ===
+  const runHybridOCR = async (base64Image) => {
     setIsVisionLoading(true);
+    let imageToProcess = base64Image;
+
     try {
+      // 1. Tenta usar o YOLO (Roboflow) para achar a área exata
+      if (ROBOFLOW_API_KEY && ROBOFLOW_MODEL) {
+        try {
+          const formData = new FormData();
+          formData.append("file", base64Image);
+          
+          const roboRes = await fetch(`https://detect.roboflow.com/${ROBOFLOW_MODEL}/${ROBOFLOW_VERSION}?api_key=${ROBOFLOW_API_KEY}`, {
+            method: 'POST',
+            body: base64Image,
+            headers: { "Content-Type": "application/x-www-form-urlencoded" }
+          });
+          
+          if (roboRes.ok) {
+            const predictions = await roboRes.json();
+            // Pega a maior predição (com mais confiança)
+            const bestCrop = predictions.predictions?.sort((a, b) => b.confidence - a.confidence)[0];
+            
+            if (bestCrop) {
+              // Recorta a imagem no navegador antes de mandar pro Google Vision
+              imageToProcess = await cropImageInBrowser(base64Image, bestCrop);
+            }
+          }
+        } catch (roboError) {
+          console.warn("Roboflow falhou ou não configurado. Usando imagem inteira no Google Vision.", roboError);
+        }
+      }
+
+      // 2. Chama o Google Vision (com a imagem recortada ou inteira)
       const response = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${GOOGLE_VISION_API_KEY}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          requests: [{ image: { content: base64Image }, features: [{ type: 'TEXT_DETECTION' }] }]
+          requests: [{ image: { content: imageToProcess }, features: [{ type: 'TEXT_DETECTION' }] }]
         })
       });
 
@@ -183,9 +236,9 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
       const originalUpper = detectedText.toUpperCase();
       let cleanText = originalUpper.replace(/[\n\r\s-]/g, '');
       
+      // A) Lógica do Contêiner
       let finalContainer = null;
       const perfectMatch = cleanText.match(/[A-Z]{4}\d{7}/);
-      
       if (perfectMatch) {
         finalContainer = perfectMatch[0];
       } else {
@@ -201,13 +254,15 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
       }
       if (finalContainer) setContainer(finalContainer);
 
-      const plateRegex = /\b[A-Z]{3}\s*-?\s*[0-9][A-Z0-9][0-9]{2}\b/g;
-      const plateMatches = originalUpper.match(plateRegex);
+      // B) Lógica da Frota (3 Dígitos - Novo Padrão)
+      // Procura por 3 números seguidos que estejam isolados (sem letras em volta)
+      const frotaRegex = /(?<!\d)\d{3}(?!\d)/g;
+      const frotaMatches = originalUpper.match(frotaRegex);
 
-      if (plateMatches && plateMatches.length > 0) {
-        const placaEncontrada = plateMatches[0].replace(/[\n\r\s-]/g, '');
-        setPlaca(placaEncontrada);
-        buscarDadosVeiculo(placaEncontrada);
+      if (frotaMatches && frotaMatches.length > 0) {
+        // Pega o primeiro grupo de 3 números encontrado
+        const numeroFrotaLido = frotaMatches[0];
+        buscarDadosVeiculo(numeroFrotaLido);
       }
 
     } catch (error) {
@@ -217,12 +272,13 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
     }
   };
 
-  const buscarDadosVeiculo = async (carretaBuscada) => {
+  // === BUSCA NO SUPABASE AGORA PELA COLUNA FROTA ===
+  const buscarDadosVeiculo = async (numeroFrotaLido) => {
     try {
       const { data, error } = await supabase
         .from('veiculos')
         .select('placa, frota, carreta')
-        .ilike('carreta', `%${carretaBuscada.substring(0,3)}%${carretaBuscada.substring(3)}%`)
+        .eq('frota', numeroFrotaLido) // Busca exata pelos 3 dígitos
         .limit(1)
         .single();
         
@@ -234,12 +290,11 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
         setCarreta(data.carreta); 
       }
     } catch (error) {
-      console.log("Placa lida pela IA, mas não encontrada no banco de dados.", error);
+      console.log(`Frota ${numeroFrotaLido} lida pela IA, mas não encontrada no banco de dados.`);
     }
   };
 
   const handleSubmit = async (e) => {
-    // ... (Seu código handleSubmit original continua igual aqui)
     e.preventDefault();
     setIsSubmitting(true);
     try {
@@ -296,7 +351,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
             <div className="bg-white/20 p-2 rounded-xl"><Truck className="w-5 h-5 text-teal-300" /></div>
             <div>
               <h2 className="text-xl font-black tracking-tight">Registro de Extra</h2>
-              <p className="text-xs text-slate-300 font-medium mt-0.5">Captura Unificada (Contêiner e Placa)</p>
+              <p className="text-xs text-slate-300 font-medium mt-0.5">Captura Unificada (Contêiner e Frota)</p>
             </div>
           </div>
           <button onClick={() => { stopCamera(); onClose(); }} className="p-2 hover:bg-white/10 rounded-full text-slate-300 hover:text-white transition-colors">
@@ -315,7 +370,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
                     <Camera className="w-8 h-8" />
                   </div>
                   <h3 className="text-xl font-bold text-slate-800">Fotografe o Conjunto</h3>
-                  <p className="text-sm text-slate-500 max-w-sm mx-auto">Enquadre o número do contêiner e a placa do veículo em uma única foto usando os guias.</p>
+                  <p className="text-sm text-slate-500 max-w-sm mx-auto">Posicione a frota do caminhão à esquerda e o código do contêiner à direita.</p>
 
                   <div className="grid grid-cols-1 gap-4 max-w-md mx-auto w-full">
                     <button type="button" onClick={startCamera} className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl p-5 flex items-center justify-center space-x-3 shadow-md transition-colors">
@@ -334,22 +389,29 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
                   <div className="relative w-full aspect-[3/4] max-w-md bg-black rounded-2xl overflow-hidden shadow-inner">
                     <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
                     
-                    {/* GUIAS VISUAIS */}
-                    <div className="absolute inset-0 flex flex-col justify-between p-6 pb-12 pointer-events-none">
-                      <div className="w-full h-[40%] border-4 border-dashed border-yellow-400 rounded-xl bg-yellow-400/20 flex flex-col items-center justify-end pb-4 shadow-[0_0_0_999px_rgba(15,23,42,0.4)]">
-                        <span className="text-white text-[10px] font-black tracking-widest uppercase bg-slate-900/80 px-3 py-1.5 rounded-full shadow-lg">
-                          Alinhe o Contêiner Aqui
-                        </span>
+                    {/* GUIAS VISUAIS ATUALIZADAS: FROTA ESQUERDA, CONTÊINER DIREITA */}
+                    <div className="absolute inset-0 flex p-6 pb-16 pointer-events-none gap-4">
+                      
+                      {/* Lado Esquerdo: Frota (Caminhão) */}
+                      <div className="w-[45%] h-full flex flex-col justify-center">
+                        <div className="w-full h-[40%] border-4 border-dashed border-blue-400 rounded-xl bg-blue-500/20 flex flex-col items-center justify-end pb-3 shadow-[0_0_0_999px_rgba(15,23,42,0.5)]">
+                          <span className="text-white text-[10px] text-center font-black tracking-widest uppercase bg-slate-900/80 px-2 py-1.5 rounded-lg shadow-lg">
+                            Nº FROTA<br/>AQUI
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex-1"></div>
-                      <div className="w-full h-[25%] border-4 border-dashed border-blue-400 rounded-xl bg-blue-500/20 flex flex-col items-center justify-end pb-3">
-                        <span className="text-white text-[10px] font-black tracking-widest uppercase bg-slate-900/80 px-3 py-1.5 rounded-full shadow-lg">
-                          Alinhe a Placa Aqui
-                        </span>
+
+                      {/* Lado Direito: Contêiner (Vertical e Alto) */}
+                      <div className="w-[55%] h-full flex flex-col justify-center">
+                        <div className="w-full h-[85%] border-4 border-dashed border-yellow-400 rounded-xl bg-yellow-400/20 flex flex-col items-center justify-end pb-4 shadow-[0_0_0_999px_rgba(15,23,42,0.5)]">
+                          <span className="text-white text-[10px] text-center font-black tracking-widest uppercase bg-slate-900/80 px-2 py-1.5 rounded-lg shadow-lg">
+                            CÓDIGO<br/>CONTÊINER
+                          </span>
+                        </div>
                       </div>
+
                     </div>
                     
-                    {/* SLIDER DE ZOOM ADICIONADO AQUI */}
                     {isZoomSupported && (
                       <div className="absolute left-4 right-4 bottom-4 flex items-center space-x-3 bg-slate-900/60 p-3 rounded-full backdrop-blur-md">
                         <ZoomIn className="w-5 h-5 text-white shrink-0" />
@@ -392,10 +454,8 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
                 </div>
               )}
 
-              {/* Box de IA, Previews e BOTÃO OFFLINE */}
               <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4 relative">
                 
-                {/* BOTÃO DE DOWNLOAD OFFLINE */}
                 <button 
                   type="button" 
                   onClick={downloadOfflinePhoto}
@@ -407,40 +467,86 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
 
                 {isVisionLoading && (
                   <div className="flex items-center text-indigo-600 font-bold text-sm bg-indigo-50 p-3 rounded-xl border border-indigo-100">
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Processando inteligência artificial...
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Analisando Imagem...
                   </div>
                 )}
                 
                 <div className="flex flex-col sm:flex-row gap-5 mt-4">
-                  {/* Imagem Única */}
                   <div className="w-full sm:w-1/3 aspect-[3/4] bg-slate-100 rounded-xl overflow-hidden border border-slate-200 shrink-0 relative">
                     {previewUrl ? <img src={previewUrl} alt="Captura" className="w-full h-full object-cover" /> : <div className="flex items-center justify-center h-full text-slate-400 text-xs font-bold">Sem foto</div>}
                   </div>
 
-                  {/* Resultados Lado a Lado */}
                   <div className="flex-1 flex flex-col justify-center space-y-3">
                     <div className={`p-3 rounded-xl border ${container ? 'bg-yellow-50 border-yellow-200' : 'bg-slate-50 border-slate-200'}`}>
                       <span className="text-[10px] font-black text-slate-400 block uppercase tracking-wider mb-0.5">Leitura do Contêiner</span>
                       <span className={`text-lg font-black tracking-wider ${!container && 'text-slate-400'}`}>{container || (isVisionLoading ? 'Analisando...' : 'NÃO LIDO')}</span>
                     </div>
 
-                    <div className={`p-3 rounded-xl border ${placa ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-200'}`}>
-                      <span className="text-[10px] font-black text-slate-400 block uppercase tracking-wider mb-0.5">Leitura da Placa</span>
-                      <span className={`text-lg font-black tracking-wider ${!placa && 'text-slate-400'}`}>{placa || (isVisionLoading ? 'Analisando...' : 'NÃO LIDA')}</span>
+                    <div className={`p-3 rounded-xl border ${frota ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-200'}`}>
+                      <span className="text-[10px] font-black text-slate-400 block uppercase tracking-wider mb-0.5">Leitura da Frota</span>
+                      <span className={`text-lg font-black tracking-wider ${!frota && 'text-slate-400'}`}>{frota || (isVisionLoading ? 'Analisando...' : 'NÃO LIDA')}</span>
                     </div>
 
-                    {frota && (
+                    {placa && (
                       <div className="text-xs bg-indigo-50 text-indigo-700 p-2.5 rounded-xl font-bold flex items-center border border-indigo-100 mt-2">
-                        <Search className="w-4 h-4 mr-2 shrink-0" /> Vínculo Automático: {frota} | {carreta}
+                        <Search className="w-4 h-4 mr-2 shrink-0" /> Vinculado: Placa {placa} | Carreta {carreta}
                       </div>
                     )}
                   </div>
                 </div>
               </div>
 
-              {/* ... O RESTO DO FORMULÁRIO (Data, Hora, Origem, Destino) PERMANECE IGUAL AO SEU CÓDIGO ... */}
-              {/* Omitido aqui por brevidade, pode manter o seu original! */}
-              
+              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Data</label>
+                    <input type="date" required value={dataFoto} onChange={e => setDataFoto(e.target.value)} className="w-full bg-slate-50 rounded-xl p-3 text-sm font-semibold border outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Hora</label>
+                    <input type="time" required value={horaFoto} onChange={e => setHoraFoto(e.target.value)} className="w-full bg-slate-50 rounded-xl p-3 text-sm font-semibold border outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Operação</label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {operacoesExtra.map(op => (
+                      <button key={op} type="button" onClick={() => setTipoOperacao(op)} className={`p-3 text-[11px] font-bold rounded-xl border transition-all ${tipoOperacao === op ? 'bg-slate-800 text-white shadow-md border-slate-800' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>{op}</button>
+                    ))}
+                  </div>
+                  {tipoOperacao === 'OUTRO' && (
+                    <input type="text" required value={outroOperacao} onChange={e => setOutroOperacao(e.target.value)} placeholder="Especifique a operação..." className="w-full mt-3 bg-slate-50 rounded-xl p-3 text-sm border outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">Origem</label>
+                    <select value={origemSelect} onChange={e => setOrigemSelect(e.target.value)} required className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm font-bold outline-none mb-2 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                      <option value="" disabled>Selecione...</option>
+                      {locaisPadrao.map(loc => <option key={loc} value={loc}>{loc}</option>)}
+                    </select>
+                    {origemSelect === 'DIGITAR MANUALMENTE' && (
+                      <input type="text" required value={origemManual} onChange={e => setOrigemManual(e.target.value)} placeholder="Digite a origem..." className="w-full bg-slate-50 border-slate-200 rounded-xl p-3 text-sm outline-none border focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5">
+                      Destino {isDestinoBloqueado && <span className="text-indigo-500">(Automático)</span>}
+                    </label>
+                    <select value={isDestinoBloqueado ? origemSelect : destinoSelect} onChange={e => setDestinoSelect(e.target.value)} disabled={isDestinoBloqueado || (!origemSelect && isDestinoBloqueado)} required className={`w-full border rounded-xl p-3 text-sm font-bold outline-none mb-2 ${isDestinoBloqueado ? 'bg-slate-200 text-slate-500 border-slate-300 cursor-not-allowed' : 'bg-slate-50 border-slate-200 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500'}`}>
+                      <option value="" disabled>Selecione...</option>
+                      {locaisPadrao.map(loc => <option key={loc} value={loc}>{loc}</option>)}
+                    </select>
+                    {destinoSelect === 'DIGITAR MANUALMENTE' && !isDestinoBloqueado && (
+                      <input type="text" required value={destinoManual} onChange={e => setDestinoManual(e.target.value)} placeholder="Digite o destino..." className="w-full bg-slate-50 border-slate-200 rounded-xl p-3 text-sm outline-none border focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+                    )}
+                  </div>
+                </div>
+              </div>
+
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setStep(1)} className="px-6 py-4 text-slate-500 bg-white border border-slate-200 hover:bg-slate-50 rounded-2xl font-bold transition-colors">Voltar</button>
                 <button type="submit" disabled={isSubmitting || isVisionLoading || !tipoOperacao} className="flex-1 bg-gradient-to-r from-indigo-600 to-indigo-500 text-white py-4 rounded-2xl font-bold shadow-md hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center">
