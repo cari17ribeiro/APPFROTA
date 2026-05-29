@@ -366,7 +366,7 @@ export default function ExtraTripScreen({ currentUser, onClose, supabase }) {
             </div>
           )}
 
-          {/* PASSO 2: FORMULÁRIO FINAL E PRÉ-VISUALIZAÇÃO */}
+          {/* PASSO 2: FORMULÁRIO FINAL El PRÉ-VISUALIZAÇÃO */}
           {step === 2 && (
             <form onSubmit={handleSubmit} className="space-y-6 animate-in fade-in slide-in-from-right-4">
               
