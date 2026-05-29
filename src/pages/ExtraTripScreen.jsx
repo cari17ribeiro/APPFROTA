@@ -186,40 +186,16 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
 
   const runHybridOCR = async (base64Image) => {
     setIsVisionLoading(true);
-    let imageToProcess = base64Image;
 
     try {
-      if (ROBOFLOW_API_KEY && ROBOFLOW_MODEL) {
-        try {
-          const formData = new FormData();
-          formData.append("file", base64Image);
-          
-          const roboRes = await fetch(`https://detect.roboflow.com/${ROBOFLOW_MODEL}/${ROBOFLOW_VERSION}?api_key=${ROBOFLOW_API_KEY}`, {
-            method: 'POST',
-            body: base64Image,
-            headers: { "Content-Type": "application/x-www-form-urlencoded" }
-          });
-          
-          if (roboRes.ok) {
-            const predictions = await roboRes.json();
-            const bestCrop = predictions.predictions?.sort((a, b) => b.confidence - a.confidence)[0];
-            
-            if (bestCrop) {
-              imageToProcess = await cropImageInBrowser(base64Image, bestCrop);
-            }
-          }
-        } catch (roboError) {
-          console.warn("Roboflow falhou ou não configurado. Usando imagem inteira.", roboError);
-        }
-      }
-
+      // REMOVIDO: Bloco do Roboflow. Vamos mandar a imagem original direto para o Vision.
+      
       const response = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${GOOGLE_VISION_API_KEY}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           requests: [{ 
-            image: { content: imageToProcess }, 
-            // 💡 ALTERAÇÃO 1: Usando DOCUMENT_TEXT_DETECTION
+            image: { content: base64Image }, // Imagem inteira e original
             features: [{ type: 'DOCUMENT_TEXT_DETECTION' }] 
           }]
         })
@@ -238,49 +214,49 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
       // A) EXTRAÇÃO INTELIGENTE (DIVISÃO ESPACIAL PARA VERTICAL)
       // ==========================================================
       if (annotations.length > 1) {
-        const words = annotations.slice(1); // Ignora o índice 0 (texto agrupado inteiro)
+        const words = annotations.slice(1);
 
-        // Acha a largura aproximada da imagem baseada no maior X encontrado
+        // Acha a largura da imagem baseada no maior X
         const maxX = Math.max(...words.flatMap(w => w.boundingPoly.vertices.map(v => v.x)));
         const middleX = maxX / 2;
 
-        // Filtra apenas as letras/números que estão na metade DIREITA da tela
+        // Filtra apenas o que está na METADE DIREITA da tela (Contêiner)
         const rightWords = words.filter(w => {
           const minX = Math.min(...w.boundingPoly.vertices.map(v => v.x));
-          return minX > (middleX * 0.7); // Pega o que está da direita pra frente
+          return minX > (middleX * 0.6); // Margem de segurança de 60% para garantir que pegou o lado direito
         });
 
-        // 💡 O TRUQUE DE MESTRE: Ordena esses blocos de CIMA para BAIXO (Coordenada Y)
+        // Ordena os blocos de CIMA para BAIXO (Coordenada Y)
         rightWords.sort((a, b) => {
           const aY = Math.min(...a.boundingPoly.vertices.map(v => v.y));
           const bY = Math.min(...b.boundingPoly.vertices.map(v => v.y));
           return aY - bY;
         });
 
-        // Monta a string do contêiner já na ordem certa
+        // Monta a string do contêiner
         let rightText = rightWords.map(w => w.description.toUpperCase()).join('');
         let cleanRightText = rightText.replace(/[\s-]/g, '');
 
-        // Previne que letras do prefixo tenham sido lidas como números
-        let prefixoTratado = cleanRightText.substring(0, 4)
-          .replace(/0/g, 'O').replace(/1/g, 'I').replace(/5/g, 'S')
-          .replace(/8/g, 'B').replace(/2/g, 'Z');
+        if (cleanRightText.length >= 11) {
+            let prefixoTratado = cleanRightText.substring(0, 4)
+              .replace(/0/g, 'O').replace(/1/g, 'I').replace(/5/g, 'S')
+              .replace(/8/g, 'B').replace(/2/g, 'Z');
 
-        // Previne que números finais tenham sido lidos como letras
-        let serialTratado = cleanRightText.substring(4)
-          .replace(/O/g, '0').replace(/I/g, '1').replace(/L/g, '1')
-          .replace(/S/g, '5').replace(/B/g, '8').replace(/Z/g, '2');
+            let serialTratado = cleanRightText.substring(4)
+              .replace(/O/g, '0').replace(/I/g, '1').replace(/L/g, '1')
+              .replace(/S/g, '5').replace(/B/g, '8').replace(/Z/g, '2');
 
-        const textoCorrigido = prefixoTratado + serialTratado;
-        
-        const spatialMatch = textoCorrigido.match(/[A-Z]{4}\d{7}/);
-        if (spatialMatch) {
-          finalContainer = spatialMatch[0];
+            const textoCorrigido = prefixoTratado + serialTratado;
+            
+            const spatialMatch = textoCorrigido.match(/[A-Z]{4}\d{7}/);
+            if (spatialMatch) {
+              finalContainer = spatialMatch[0];
+            }
         }
       }
 
       // ==========================================================
-      // B) FALLBACK: SUA TÁTICA ORIGINAL (Caso a espacial falhe)
+      // B) FALLBACK ORIGINAL (Horizontal Clássico)
       // ==========================================================
       if (!finalContainer) {
         let singleLineText = originalUpper.replace(/[\n\r]/g, ' ');
@@ -324,10 +300,12 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
       // ==========================================
       // C) EXTRAÇÃO DA FROTA / PLACA
       // ==========================================
-      const frotaRegex = /(?<!\d)\d{3}(?!\d)/g;
+      // Ajustei para procurar a frota de forma mais limpa, pegando conjuntos de 3 a 4 números
+      const frotaRegex = /(?<!\d)\d{3,4}(?!\d)/g;
       const frotaMatches = originalUpper.match(frotaRegex);
 
       if (frotaMatches && frotaMatches.length > 0) {
+        // Pega o primeiro número que bater com o formato de frota
         const numeroFrotaLido = frotaMatches[0];
         buscarDadosVeiculo(numeroFrotaLido);
       }
