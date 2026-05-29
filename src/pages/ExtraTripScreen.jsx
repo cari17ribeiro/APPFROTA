@@ -162,7 +162,6 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
     setHoraFoto(dateToUse.toTimeString().split(' ')[0].substring(0, 5));
   };
 
-  // === FUNÇÃO DE RECORTE (FRONTEND) CORRIGIDA ===
   const cropImageInBrowser = (base64Image, box) => {
     return new Promise((resolve, reject) => {
       const img = new Image();
@@ -172,9 +171,6 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
 
-        // A ROTAÇÃO FOI REMOVIDA DAQUI! 
-        // O Roboflow agora apenas recorta a caixa delimitadora do jeito que ela é.
-        // Rotacionar texto empilhado deitava as letras e quebrava o OCR do Google.
         canvas.width = box.width;
         canvas.height = box.height;
         const startX = box.x - (box.width / 2);
@@ -213,7 +209,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
             }
           }
         } catch (roboError) {
-          console.warn("Roboflow falhou ou não configurado. Usando imagem inteira no Google Vision.", roboError);
+          console.warn("Roboflow falhou ou não configurado. Usando imagem inteira.", roboError);
         }
       }
 
@@ -232,48 +228,59 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
       if (!detectedText) throw new Error('Sem texto na imagem');
 
       const originalUpper = detectedText.toUpperCase();
-      let cleanText = originalUpper.replace(/[\n\r\s-]/g, '');
       let finalContainer = null;
       
-      // ==========================================
-      // A) EXTRAÇÃO DO CONTÊINER (Agressiva para Vertical)
-      // ==========================================
+      // ==========================================================
+      // A) EXTRAÇÃO DO CONTÊINER (NOVA LÓGICA VERTICAL BLINDADA)
+      // ==========================================================
+      
+      // 1. Achata o texto para 1 linha com espaços, para as palavras não colarem
+      let singleLineText = originalUpper.replace(/[\n\r]/g, ' ');
+
+      // 2. Remove blocos de peso ANTES de tirar os espaços (protege o número do contêiner)
+      singleLineText = singleLineText.replace(/\b(?:TARE|MAX|GROSS|PAYLOAD|NET|WT|CU\s*CAP)\b.*?(?:KGS|LBS|KG|LB|CU\s*M|CU\s*FT)\b/g, '');
+      
+      // 3. Remove códigos ISO isolados (Ex: 45R1, 22G1)
+      singleLineText = singleLineText.replace(/\b\d{2}[A-Z][A-Z0-9]\b/g, '');
+
+      // 4. Limpeza final: arranca todos os espaços e traços
+      let cleanText = singleLineText.replace(/[\s-]/g, '');
+
+      // NÍVEL 1: Busca Horizontal Tradicional Limpa
       const perfectMatch = cleanText.match(/[A-Z]{4}\d{7}/);
       
       if (perfectMatch) {
         finalContainer = perfectMatch[0];
       } else {
-        // Tática para Vertical: Lê de cima para baixo ignorando lixo do meio
+        // NÍVEL 2: Tática Vertical (Lida perfeitamente com a frota misturada à esquerda)
         const soLetras = cleanText.replace(/[^A-Z]/g, '');
         const prefixMatch = soLetras.match(/[A-Z]{3}[UJZ]/); 
 
         if (prefixMatch) {
-          const prefix = prefixMatch[0];
+          const prefix = prefixMatch[0]; // Ex: HLBU
           
-          // Cria regex para achar onde essas letras estão no texto original limpo
-          const regexStr = prefix.split('').join('[^A-Z]*');
+          // O ".*?" permite que haja MISTURA de números da frota ENTRE as letras do contêiner
+          const regexStr = prefix.split('').join('.*?');
           const interleavedRegex = new RegExp(regexStr);
           const matchInterleaved = cleanText.match(interleavedRegex);
 
           if (matchInterleaved) {
-            const startIndex = matchInterleaved.index;
-            // Pega o bloco da primeira letra até uns 40 caracteres pra frente
-            let block = cleanText.substring(startIndex, startIndex + 40);
+            // O CORTE MÁGICO: Corta a string EXATAMENTE após a última letra do prefixo (ex: U)
+            // Isso joga fora todo o lixo e números que estavam misturados nas letras
+            const textoAposPrefixo = cleanText.substring(matchInterleaved.index + matchInterleaved[0].length);
 
-            // Remove as 4 letras do prefixo encontradas para sobrar apenas números e lixo
-            for (let char of prefix) {
-              block = block.replace(char, '');
-            }
+            // Analisa apenas os próximos 40 caracteres pra baixo
+            let block = textoAposPrefixo.substring(0, 40);
 
-            // O que sobrou converte confusões visuais (O por 0, S por 5, etc)
+            // Converte confusões visuais clássicas do OCR
             let cleanedDigits = block
               .replace(/O/g, '0').replace(/I/g, '1').replace(/L/g, '1')
               .replace(/S/g, '5').replace(/B/g, '8').replace(/Z/g, '2');
 
-            // Extermina tudo que não for número
+            // Extermina o que for letra, sobram apenas números puros
             const justNumbers = cleanedDigits.replace(/[^\d]/g, '');
             
-            // Pega os 7 primeiros números encontrados abaixo das letras!
+            // Pega os 7 primeiros números cravados após as letras
             if (justNumbers.length >= 7) {
               finalContainer = prefix + justNumbers.substring(0, 7);
             }
