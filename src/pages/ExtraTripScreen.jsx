@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Camera, Image as ImageIcon, CheckCircle, AlertCircle, Loader2, XCircle, ArrowRight, Truck, Search, ZoomIn, Download } from 'lucide-react';
+import { Camera, Image as ImageIcon, AlertCircle, Loader2, XCircle, ArrowRight, Truck, Search, ZoomIn, Download } from 'lucide-react';
+import { runHybridOcrPipeline } from '../services/hybridOcrPipeline.js';
+import { isValidContainerCode, normalizeOcrText } from '../utils/ocrNormalization.js';
 
-export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase }) {
+export default function ExtraTripScreen({ currentUser, onClose, supabase }) {
   const [step, setStep] = useState(1);
   
   const [file, setFile] = useState(null);
@@ -20,6 +22,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
   const [placa, setPlaca] = useState('');
   const [frota, setFrota] = useState('');
   const [carreta, setCarreta] = useState('');
+  const [ocrResult, setOcrResult] = useState(null);
 
   
   const operacoesExtra = ['REMOÇÃO', 'PESAGEM', 'TRANSFERÊNCIA', 'SCANNER - TRA', 'OUTRO'];
@@ -42,11 +45,6 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
   
-  const GOOGLE_VISION_API_KEY = import.meta.env.VITE_GOOGLE_VISION_API_KEY;
-  const ROBOFLOW_API_KEY = import.meta.env.VITE_ROBOFLOW_API_KEY;
-  const ROBOFLOW_MODEL = import.meta.env.VITE_ROBOFLOW_MODEL;
-  const ROBOFLOW_VERSION = import.meta.env.VITE_ROBOFLOW_VERSION;
-
   useEffect(() => {
     return () => stopCamera();
   }, []);
@@ -72,7 +70,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
         }
       }, 500); 
       
-    } catch (error) {
+    } catch {
       alert("Não foi possível abrir a câmera. Certifique-se de dar permissão ou use a Galeria.");
       setIsCameraActive(false);
     }
@@ -135,6 +133,11 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
 
     setFile(mockFile);
     setPreviewUrl(imgUrl);
+    setContainer('');
+    setPlaca('');
+    setFrota('');
+    setCarreta('');
+    setOcrResult(null);
     setMetadados(mockFile);
     stopCamera();
     setStep(2); 
@@ -159,149 +162,17 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
     setHoraFoto(dateToUse.toTimeString().split(' ')[0].substring(0, 5));
   };
 
-  const cropImageInBrowser = (base64Image, box) => {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.src = `data:image/jpeg;base64,${base64Image}`;
-      
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-
-        canvas.width = box.width;
-        canvas.height = box.height;
-        const startX = box.x - (box.width / 2);
-        const startY = box.y - (box.height / 2);
-        
-        ctx.drawImage(img, startX, startY, box.width, box.height, 0, 0, box.width, box.height);
-
-        resolve(canvas.toDataURL('image/jpeg', 1.0).split(',')[1]);
-      };
-      img.onerror = reject;
-    });
-  };
-
   const runHybridOCR = async (base64Image) => {
     setIsVisionLoading(true);
 
     try {
-      // REMOVIDO: Bloco do Roboflow. Vamos mandar a imagem original direto para o Vision.
-      
-      const response = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${GOOGLE_VISION_API_KEY}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requests: [{ 
-            image: { content: base64Image }, // Imagem inteira e original
-            features: [{ type: 'DOCUMENT_TEXT_DETECTION' }] 
-          }]
-        })
-      });
+      const result = await runHybridOcrPipeline(base64Image);
+      setOcrResult(result);
+      if (import.meta.env.VITE_OCR_DEBUG === 'true') console.debug('OCR debug:', result.debug);
 
-      if (!response.ok) throw new Error('Falha API Vision');
-      const data = await response.json();
-      
-      const annotations = data.responses[0]?.textAnnotations;
-      if (!annotations || annotations.length === 0) throw new Error('Sem texto na imagem');
-
-      const originalUpper = annotations[0].description.toUpperCase();
-      let finalContainer = null;
-      
- 
-      // ==========================================================
-      if (annotations.length > 1) {
-        const words = annotations.slice(1);
-
-        // Acha a largura da imagem baseada no maior X
-        const maxX = Math.max(...words.flatMap(w => w.boundingPoly.vertices.map(v => v.x)));
-        const middleX = maxX / 2;
-
-        // Filtra apenas o que está na METADE DIREITA da tela (Contêiner)
-        const rightWords = words.filter(w => {
-          const minX = Math.min(...w.boundingPoly.vertices.map(v => v.x));
-          return minX > (middleX * 0.6); // Margem de segurança de 60% para garantir que pegou o lado direito
-        });
-
-        // Ordena os blocos de CIMA para BAIXO (Coordenada Y)
-        rightWords.sort((a, b) => {
-          const aY = Math.min(...a.boundingPoly.vertices.map(v => v.y));
-          const bY = Math.min(...b.boundingPoly.vertices.map(v => v.y));
-          return aY - bY;
-        });
-
-        // Monta a string do contêiner
-        let rightText = rightWords.map(w => w.description.toUpperCase()).join('');
-        let cleanRightText = rightText.replace(/[\s-]/g, '');
-
-        if (cleanRightText.length >= 11) {
-            let prefixoTratado = cleanRightText.substring(0, 4)
-              .replace(/0/g, 'O').replace(/1/g, 'I').replace(/5/g, 'S')
-              .replace(/8/g, 'B').replace(/2/g, 'Z');
-
-            let serialTratado = cleanRightText.substring(4)
-              .replace(/O/g, '0').replace(/I/g, '1').replace(/L/g, '1')
-              .replace(/S/g, '5').replace(/B/g, '8').replace(/Z/g, '2');
-
-            const textoCorrigido = prefixoTratado + serialTratado;
-            
-            const spatialMatch = textoCorrigido.match(/[A-Z]{4}\d{7}/);
-            if (spatialMatch) {
-              finalContainer = spatialMatch[0];
-            }
-        }
-      }
-
-      // ==========================================================
-      if (!finalContainer) {
-        let singleLineText = originalUpper.replace(/[\n\r]/g, ' ');
-        singleLineText = singleLineText.replace(/\b(?:TARE|MAX|GROSS|PAYLOAD|NET|WT|CU\s*CAP)\b.*?(?:KGS|LBS|KG|LB|CU\s*M|CU\s*FT)\b/g, '');
-        singleLineText = singleLineText.replace(/\b\d{2}[A-Z][A-Z0-9]\b/g, '');
-        
-        let cleanText = singleLineText.replace(/[\s-]/g, '');
-        const perfectMatch = cleanText.match(/[A-Z]{4}\d{7}/);
-        
-        if (perfectMatch) {
-          finalContainer = perfectMatch[0];
-        } else {
-          const soLetras = cleanText.replace(/[^A-Z]/g, '');
-          const prefixMatch = soLetras.match(/[A-Z]{3}[UJZ]/); 
-
-          if (prefixMatch) {
-            const prefix = prefixMatch[0];
-            const regexStr = prefix.split('').join('.*?');
-            const interleavedRegex = new RegExp(regexStr);
-            const matchInterleaved = cleanText.match(interleavedRegex);
-
-            if (matchInterleaved) {
-              const textoAposPrefixo = cleanText.substring(matchInterleaved.index + matchInterleaved[0].length);
-              let block = textoAposPrefixo.substring(0, 40);
-              let cleanedDigits = block
-                .replace(/O/g, '0').replace(/I/g, '1').replace(/L/g, '1')
-                .replace(/S/g, '5').replace(/B/g, '8').replace(/Z/g, '2');
-
-              const justNumbers = cleanedDigits.replace(/[^\d]/g, '');
-              
-              if (justNumbers.length >= 7) {
-                finalContainer = prefix + justNumbers.substring(0, 7);
-              }
-            }
-          }
-        }
-      }
-      
-      if (finalContainer) setContainer(finalContainer);
-
-      
-      // ==========================================
-      // Ajustei para procurar a frota de forma mais limpa, pegando conjuntos de 3 a 4 números
-      const frotaRegex = /(?<!\d)\d{3,4}(?!\d)/g;
-      const frotaMatches = originalUpper.match(frotaRegex);
-
-      if (frotaMatches && frotaMatches.length > 0) {
-        // Pega o primeiro número que bater com o formato de frota
-        const numeroFrotaLido = frotaMatches[0];
-        buscarDadosVeiculo(numeroFrotaLido);
-      }
+      if (result.containerCode) setContainer(result.containerCode);
+      if (result.plate) setPlaca(result.plate);
+      if (result.fleetNumber) buscarDadosVeiculo(result.fleetNumber);
 
     } catch (error) {
       console.log("Falha ao processar OCR:", error);
@@ -326,7 +197,7 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
         setPlaca(data.placa); 
         setCarreta(data.carreta); 
       }
-    } catch (error) {
+    } catch {
       console.log(`Frota ${numeroFrotaLido} lida pela IA, mas não encontrada no banco de dados.`);
     }
   };
@@ -377,6 +248,20 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
   };
 
   const isDestinoBloqueado = tipoOperacao === 'REMOÇÃO' || tipoOperacao === 'PESAGEM';
+  const containerAlternatives = Array.from(
+    new Map(
+      (ocrResult?.alternatives || [])
+        .filter((candidate) =>
+          candidate.text &&
+          candidate.regexValid &&
+          candidate.ownerCategoryValid &&
+          candidate.freightContainerCategory &&
+          candidate.checkDigitValid
+        )
+        .map((candidate) => [candidate.text, candidate])
+    ).values()
+  ).slice(0, 4);
+  const containerManualValid = container ? isValidContainerCode(container) : false;
 
   return (
     <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 sm:p-6 overflow-y-auto">
@@ -517,6 +402,60 @@ export default function ExtraTripScreen({ currentUser, onClose, onSave, supabase
                     <div className={`p-3 rounded-xl border ${container ? 'bg-yellow-50 border-yellow-200' : 'bg-slate-50 border-slate-200'}`}>
                       <span className="text-[10px] font-black text-slate-400 block uppercase tracking-wider mb-0.5">Leitura do Contêiner</span>
                       <span className={`text-lg font-black tracking-wider ${!container && 'text-slate-400'}`}>{container || (isVisionLoading ? 'Analisando...' : 'NÃO LIDO')}</span>
+                      <div className="mt-3">
+                        <label className="text-[10px] font-black text-slate-400 block uppercase tracking-wider mb-1">
+                          Confirmar / corrigir contêiner
+                        </label>
+                        <input
+                          type="text"
+                          value={container}
+                          onChange={(e) => setContainer(normalizeOcrText(e.target.value).slice(0, 11))}
+                          placeholder="AAAA0000000"
+                          maxLength={11}
+                          className={`w-full rounded-lg border px-3 py-2 text-sm font-black tracking-wider outline-none transition-colors ${
+                            !container
+                              ? 'bg-white border-slate-200 focus:border-yellow-300'
+                              : containerManualValid
+                                ? 'bg-emerald-50 border-emerald-200 text-emerald-800 focus:border-emerald-400'
+                                : 'bg-amber-50 border-amber-200 text-amber-800 focus:border-amber-400'
+                          }`}
+                        />
+                        {container && (
+                          <span className={`mt-1 block text-[10px] font-bold ${containerManualValid ? 'text-emerald-600' : 'text-amber-700'}`}>
+                            {containerManualValid ? 'Dígito verificador válido' : 'Confira o código: formato ou dígito verificador não bate'}
+                          </span>
+                        )}
+                      </div>
+                      {ocrResult?.ambiguous && (
+                        <div className="mt-2 flex items-start text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                          <AlertCircle className="w-4 h-4 mr-1.5 mt-0.5 shrink-0" />
+                          <span>Leitura ambígua. Confirme uma opção abaixo.</span>
+                        </div>
+                      )}
+                      {containerAlternatives.length > 0 && (
+                        <div className="mt-3 space-y-2">
+                          <span className="text-[10px] font-black text-slate-400 block uppercase tracking-wider">Alternativas ISO</span>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {containerAlternatives.map((candidate) => (
+                              <button
+                                key={candidate.text}
+                                type="button"
+                                onClick={() => setContainer(candidate.text)}
+                                className={`text-left rounded-lg border px-3 py-2 transition-colors ${
+                                  container === candidate.text
+                                    ? 'bg-yellow-100 border-yellow-300 text-slate-900'
+                                    : 'bg-white border-slate-200 hover:border-yellow-300 hover:bg-yellow-50 text-slate-700'
+                                }`}
+                              >
+                                <span className="block text-sm font-black tracking-wider">{candidate.text}</span>
+                                <span className="block text-[10px] font-bold text-slate-400">
+                                  Score {Math.round(candidate.score)} · {candidate.candidateSource || candidate.transform}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     <div className={`p-3 rounded-xl border ${frota ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-200'}`}>
