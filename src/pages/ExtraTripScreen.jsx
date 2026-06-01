@@ -607,7 +607,7 @@ export default function ExtraTripScreen({ currentUser, onClose, supabase }) {
                       <option value="" disabled>Selecione...</option>
                       {locaisPadrao.map(loc => <option key={loc} value={loc}>{loc}</option>)}
                     </select>
-                    {destinoSelect === 'DIGITAR MANUALMENTE' && !isDestinoBloqueado && (
+                    {destinoSelect === 'DIGITAR MANUALMENTE.' && !isDestinoBloqueado && (
                       <input type="text" required value={destinoManual} onChange={e => setDestinoManual(e.target.value)} placeholder="Digite o destino..." className="w-full bg-slate-50 border-slate-200 rounded-xl p-3 text-sm outline-none border focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
                     )}
                   </div>
