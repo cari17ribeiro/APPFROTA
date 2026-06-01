@@ -1,6 +1,6 @@
 const JPEG_QUALITY = 0.92;
 
-const canvasToBase64 = (canvas) => canvas.toDataURL('image/jpeg', JPEG_QUALITY).split(',')[1];
+const canvasToBase64 = (canvas, quality = JPEG_QUALITY) => canvas.toDataURL('image/jpeg', quality).split(',')[1];
 
 export const loadBase64Image = (base64Image) =>
   new Promise((resolve, reject) => {
@@ -9,6 +9,11 @@ export const loadBase64Image = (base64Image) =>
     img.onerror = reject;
     img.src = `data:image/jpeg;base64,${base64Image}`;
   });
+
+export const getBase64ImageDimensions = async (base64Image) => {
+  const img = await loadBase64Image(base64Image);
+  return { width: img.width, height: img.height };
+};
 
 const drawImageToCanvas = (img, width = img.width, height = img.height) => {
   const canvas = document.createElement('canvas');
@@ -19,6 +24,21 @@ const drawImageToCanvas = (img, width = img.width, height = img.height) => {
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
   return canvas;
+};
+
+export const resizeBase64ImageForOcr = async (base64Image, config = {}) => {
+  const maxDimension = config.maxInputImageDimension ?? 1600;
+  const quality = config.inputJpegQuality || 0.82;
+  if (maxDimension <= 0) return base64Image;
+
+  const img = await loadBase64Image(base64Image);
+  const largestSide = Math.max(img.width, img.height);
+
+  if (largestSide <= maxDimension) return base64Image;
+
+  const scale = maxDimension / largestSide;
+  const canvas = drawImageToCanvas(img, img.width * scale, img.height * scale);
+  return canvasToBase64(canvas, quality);
 };
 
 const cloneCanvas = (source) => {
@@ -216,35 +236,49 @@ export const buildHeuristicContainerDetections = async (base64Image) => {
 export const generateOcrImageVariations = async (base64Image, config = {}, detectionClass = '') => {
   const img = await loadBase64Image(base64Image);
   const baseCanvas = drawImageToCanvas(img);
-  const variations = [{ transform: 'original', canvas: baseCanvas }];
-  const preferVertical = detectionClass.includes('vertical');
+  const contrast = config.enableContrast !== false ? contrastCanvas(baseCanvas) : null;
+  const grayscale = grayscaleCanvas(baseCanvas);
+  const preferVertical = detectionClass.includes('vertical') || detectionClass.includes('container');
+  const variations = [];
 
-  if (config.enableRotations !== false) {
-    const rotated90 = rotateCanvas(baseCanvas, 90);
-    const rotatedMinus90 = rotateCanvas(baseCanvas, -90);
-    variations.push(
-      { transform: 'rotate_90', canvas: rotated90 },
-      { transform: 'rotate_-90', canvas: rotatedMinus90 },
-      { transform: 'rotate_180', canvas: rotateCanvas(baseCanvas, 180) }
-    );
-
-    if (config.enableContrast !== false) {
+  if (preferVertical) {
+    if (config.enableRotations !== false) {
+      const rotated90 = rotateCanvas(baseCanvas, 90);
+      const rotatedMinus90 = rotateCanvas(baseCanvas, -90);
       variations.push(
-        { transform: 'rotate_90_contrast', canvas: contrastCanvas(rotated90) },
-        { transform: 'rotate_-90_contrast', canvas: contrastCanvas(rotatedMinus90) }
+        { transform: 'rotate_90', canvas: rotated90 },
+        { transform: 'rotate_-90', canvas: rotatedMinus90 }
+      );
+      if (config.enableContrast !== false) {
+        variations.push(
+          { transform: 'rotate_90_contrast', canvas: contrastCanvas(rotated90) },
+          { transform: 'rotate_-90_contrast', canvas: contrastCanvas(rotatedMinus90) }
+        );
+      }
+    }
+    variations.push({ transform: 'original', canvas: baseCanvas });
+    variations.push({ transform: 'scale_2x', canvas: scaleCanvas(baseCanvas, 2) });
+    if (contrast) variations.push({ transform: 'contrast', canvas: contrast });
+    variations.push({ transform: 'grayscale', canvas: grayscale });
+  } else {
+    variations.push({ transform: 'original', canvas: baseCanvas });
+    if (contrast) variations.push({ transform: 'contrast', canvas: contrast });
+    variations.push({ transform: 'grayscale', canvas: grayscale });
+    variations.push({ transform: 'scale_2x', canvas: scaleCanvas(baseCanvas, 2) });
+    if (config.enableRotations !== false) {
+      variations.push(
+        { transform: 'rotate_90', canvas: rotateCanvas(baseCanvas, 90) },
+        { transform: 'rotate_-90', canvas: rotateCanvas(baseCanvas, -90) }
       );
     }
   }
 
-  variations.push({ transform: 'scale_2x', canvas: scaleCanvas(baseCanvas, 2) });
-
-  if (config.enableContrast !== false) variations.push({ transform: 'contrast', canvas: contrastCanvas(baseCanvas) });
-  variations.push({ transform: 'grayscale', canvas: grayscaleCanvas(baseCanvas) });
   if (config.enableThreshold !== false) variations.push({ transform: 'threshold', canvas: thresholdCanvas(baseCanvas) });
   if (config.enableSharpen !== false) variations.push({ transform: 'sharpen', canvas: sharpenCanvas(baseCanvas) });
+  if (config.enableRotations !== false) variations.push({ transform: 'rotate_180', canvas: rotateCanvas(baseCanvas, 180) });
 
   const ordered = preferVertical
-    ? variations.sort((a, b) => Number(b.transform.includes('rotate')) - Number(a.transform.includes('rotate')))
+    ? variations
     : variations;
 
   return ordered.slice(0, config.maxOcrVariationsPerDetection || 8).map((variation) => ({

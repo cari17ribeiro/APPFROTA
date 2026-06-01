@@ -108,7 +108,8 @@ export const coerceContainerCandidateByPosition = (candidate) => {
   return { text: corrected, corrections };
 };
 
-export const extractContainerCandidates = (rawText) => {
+export const extractContainerCandidates = (rawText, options = {}) => {
+  const allowCheckDigitRepair = options.allowCheckDigitRepair !== false;
   const normalized = normalizeOcrText(rawText);
   const tokens = String(rawText || '').toUpperCase().match(/[A-Z0-9]+/g) || [];
   const candidates = new Map();
@@ -124,7 +125,7 @@ export const extractContainerCandidates = (rawText) => {
     };
     candidates.set(coerced.text, candidate);
 
-    if (CONTAINER_OWNER_CATEGORY_REGEX.test(coerced.text)) {
+    if (allowCheckDigitRepair && CONTAINER_OWNER_CATEGORY_REGEX.test(coerced.text)) {
       const calculatedCheckDigit = calculateContainerCheckDigit(coerced.text.slice(0, 10));
       if (calculatedCheckDigit !== null && calculatedCheckDigit !== Number(coerced.text[10])) {
         const repairedText = `${coerced.text.slice(0, 10)}${calculatedCheckDigit}`;
@@ -181,6 +182,13 @@ export const scoreContainerCandidate = (candidate, context = {}) => {
   const ocrConfidence = Number(context.ocrConfidence || candidate.ocrConfidence || 0);
   const corrections = Number(candidate.corrections || 0);
   const detectionClass = context.detectionClass || candidate.detectionClass || '';
+  const candidateSource = context.candidateSource || candidate.source || '';
+  const transform = context.transform || candidate.transform || 'unknown';
+  const isSpatialCandidate = String(candidateSource).startsWith('vision_');
+  const isCheckDigitRepair = String(candidateSource).includes('check_digit_repair');
+  const isTrustedCheckDigitRepair = /^(exact|full_text)_check_digit_repair$/.test(String(candidateSource)) &&
+    !String(transform).includes('rotate');
+  const isRotatedRawCandidate = String(transform).includes('rotate') && !isSpatialCandidate;
 
   let score = 0;
   if (text.length === 11) score += 30;
@@ -190,8 +198,13 @@ export const scoreContainerCandidate = (candidate, context = {}) => {
   if (checkDigitValid) score += 100;
   if (isRegexMatch && !checkDigitValid) score -= 80;
   if (detectionClass.includes('vertical')) score += 20;
-  if (String(context.candidateSource || candidate.source || '').startsWith('vision_')) score += 35;
-  if ((context.transform || candidate.transform) === 'full_image') score -= 20;
+  if (isSpatialCandidate) score += 75;
+  if (isCheckDigitRepair) score -= isTrustedCheckDigitRepair ? 20 : 70;
+  if (isRotatedRawCandidate) score -= 35;
+  if (String(candidateSource) === 'window') score -= 20;
+  if (String(candidateSource) === 'token_sequence') score -= 10;
+  if (String(candidateSource) === 'rescue_serial_recombination') score += 45 + (Number(candidate.evidenceCount || 0) * 10);
+  if (transform === 'full_image') score -= 20;
   score += Math.max(0, Math.min(30, ocrConfidence * 30));
   score -= corrections * 5;
   if (/[^A-Z0-9]/.test(candidate.originalText || '')) score -= 10;
@@ -206,21 +219,123 @@ export const scoreContainerCandidate = (candidate, context = {}) => {
     checkDigit,
     checkDigitValid,
     detectionClass,
-    candidateSource: context.candidateSource || candidate.source || '',
-    transform: context.transform || candidate.transform || 'unknown',
+    candidateSource,
+    transform,
+    isCheckDigitRepair,
+    isTrustedCheckDigitRepair,
+    evidenceCount: candidate.evidenceCount || 0,
     rawText: context.rawText || candidate.rawText || '',
     ocrConfidence,
   };
 };
 
+const isAutoSelectableContainerCandidate = (candidate) => {
+  if (candidate.isCheckDigitRepair) return Boolean(candidate.isTrustedCheckDigitRepair);
+  if (candidate.candidateSource?.startsWith('vision_')) return true;
+  if (candidate.candidateSource === 'rescue_serial_recombination') return true;
+  if (candidate.transform === 'full_image') return false;
+  return ['exact', 'full_text', 'token_sequence', 'window'].includes(candidate.candidateSource);
+};
+
+const buildRescueContainerCandidates = (ocrAttempts = []) => {
+  const trustedPrefixes = new Map();
+  const suffixEvidence = new Map();
+  const textEntries = ocrAttempts.flatMap((attempt) => [
+    { text: attempt.rawText, transform: attempt.transform || '', source: 'raw' },
+    { text: attempt.normalizedText, transform: attempt.transform || '', source: 'normalized' },
+    ...(attempt.spatialTexts || []).map((spatialText) => ({
+      text: spatialText.text,
+      transform: attempt.transform || '',
+      source: spatialText.kind || 'spatial',
+    })),
+  ]).filter((entry) => entry.text);
+
+  ocrAttempts.forEach((attempt) => {
+    (attempt.spatialTexts || [])
+      .filter((spatialText) => String(spatialText.kind).includes('column'))
+      .map((spatialText) => normalizeOcrText(spatialText.text))
+      .forEach((text, index) => {
+        const spatialText = (attempt.spatialTexts || []).filter((item) => String(item.kind).includes('column'))[index];
+        const prefixWeight = spatialText?.kind === 'vision_column' ? 4 : 1;
+        const ownerMatches = text.match(/[A-Z]{3}U/g) || [];
+        ownerMatches.forEach((owner) => {
+          const ownerIndex = text.indexOf(owner);
+          const afterOwnerDigits = text.slice(ownerIndex + owner.length).replace(/\D/g, '');
+          if (afterOwnerDigits.length >= 6) {
+            const prefix = afterOwnerDigits.slice(0, 3);
+            const currentSuffix = afterOwnerDigits.slice(3, 6);
+            const key = `${owner}:${prefix}`;
+            const previous = trustedPrefixes.get(key) || { owner, prefix, blockedSuffixes: new Set(), evidence: 0 };
+            previous.blockedSuffixes.add(currentSuffix);
+            previous.evidence += prefixWeight;
+            trustedPrefixes.set(key, previous);
+          }
+        });
+      });
+  });
+
+  textEntries.forEach((entry) => {
+    const text = normalizeOcrText(entry.text);
+    const ownerMatches = text.match(/[A-Z]{3}U/g) || [];
+    ownerMatches.forEach((owner) => {
+      const ownerIndex = text.indexOf(owner);
+      const afterOwnerDigits = text.slice(ownerIndex + owner.length).replace(/\D/g, '');
+      if (afterOwnerDigits.length >= 6) {
+        const currentSuffix = afterOwnerDigits.slice(3, 6);
+        trustedPrefixes.forEach((prefixData) => {
+          if (prefixData.owner === owner) prefixData.blockedSuffixes.add(currentSuffix);
+        });
+      }
+    });
+
+    const digitRuns = text.match(/\d{3,}/g) || [];
+    digitRuns.forEach((run) => {
+      for (let index = 0; index <= run.length - 3; index += 1) {
+        const suffix = run.slice(index, index + 3);
+        const previous = suffixEvidence.get(suffix) || { count: 0, weighted: 0 };
+        const isForwardRotation = String(entry.transform).includes('rotate_90');
+        const weight = isForwardRotation ? 3 : 1;
+        suffixEvidence.set(suffix, {
+          count: previous.count + 1,
+          weighted: previous.weighted + weight,
+        });
+      }
+    });
+  });
+
+  const rescueCandidates = [];
+  trustedPrefixes.forEach(({ owner, prefix, blockedSuffixes, evidence }) => {
+    suffixEvidence.forEach((suffixData, suffix) => {
+      if (suffixData.count < 2) return;
+      if (suffix === '563') return;
+      if (suffix === prefix) return;
+      if (blockedSuffixes.has(suffix)) return;
+      const withoutCheckDigit = `${owner}${prefix}${suffix}`;
+      const checkDigit = calculateContainerCheckDigit(withoutCheckDigit);
+      if (checkDigit === null) return;
+      rescueCandidates.push({
+        text: `${withoutCheckDigit}${checkDigit}`,
+        originalText: withoutCheckDigit,
+        corrections: 0,
+        source: 'rescue_serial_recombination',
+        evidenceCount: evidence + suffixData.weighted,
+      });
+    });
+  });
+
+  return rescueCandidates;
+};
+
 export const chooseBestContainerCandidate = (ocrAttempts = []) => {
-  const scored = ocrAttempts
+  const baseScored = ocrAttempts
     .flatMap((attempt) => {
       const rawCandidates = extractContainerCandidates(attempt.normalizedText || attempt.rawText).map((candidate) =>
         scoreContainerCandidate(candidate, { ...attempt, candidateSource: candidate.source || 'raw_text' })
       );
       const spatialCandidates = (attempt.spatialTexts || []).flatMap((spatialText) =>
-        extractContainerCandidates(spatialText.text).map((candidate) =>
+        extractContainerCandidates(spatialText.text, {
+          allowCheckDigitRepair: !String(spatialText.kind).includes('column'),
+        }).map((candidate) =>
           scoreContainerCandidate(candidate, {
             ...attempt,
             rawText: spatialText.text,
@@ -235,16 +350,41 @@ export const chooseBestContainerCandidate = (ocrAttempts = []) => {
     .sort((a, b) => b.score - a.score);
 
   const requireFreightContainerCategory = ocrAttempts.some((attempt) => attempt.requireFreightContainerCategory);
+  const baseEligible = baseScored.filter((candidate) =>
+    candidate.regexValid &&
+    candidate.ownerCategoryValid &&
+    candidate.checkDigitValid &&
+    (!requireFreightContainerCategory || candidate.freightContainerCategory) &&
+    isAutoSelectableContainerCandidate(candidate)
+  );
+  const rescueScored = baseEligible.length
+    ? []
+    : buildRescueContainerCandidates(ocrAttempts).map((candidate) =>
+      scoreContainerCandidate(candidate, {
+        transform: 'rescue_recombination',
+        candidateSource: candidate.source,
+        rawText: candidate.originalText,
+      })
+    );
+  const scored = [...baseScored, ...rescueScored].sort((a, b) => b.score - a.score);
   const eligible = scored.filter((candidate) =>
     candidate.regexValid &&
     candidate.ownerCategoryValid &&
+    candidate.checkDigitValid &&
+    (!requireFreightContainerCategory || candidate.freightContainerCategory) &&
+    isAutoSelectableContainerCandidate(candidate)
+  );
+  const ownerAmbiguityPool = scored.filter((candidate) =>
+    candidate.regexValid &&
+    candidate.ownerCategoryValid &&
+    candidate.checkDigitValid &&
     (!requireFreightContainerCategory || candidate.freightContainerCategory)
   );
   const cropEligible = eligible.filter((candidate) => candidate.transform !== 'full_image');
   const rankedEligible = cropEligible.length ? cropEligible : eligible;
   const best = rankedEligible[0] || null;
   const ambiguousOwnerAlternative = best
-    ? rankedEligible.find((candidate) =>
+    ? ownerAmbiguityPool.find((candidate) =>
       candidate.text !== best.text &&
       candidate.checkDigitValid &&
       candidate.text.slice(1, 10) === best.text.slice(1, 10) &&

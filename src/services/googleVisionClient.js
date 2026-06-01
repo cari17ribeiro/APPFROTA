@@ -45,6 +45,7 @@ export const runGoogleVisionOcr = async (base64Image, apiKey) => {
   return {
     rawText,
     textAnnotations,
+    fullTextAnnotation: visionResponse.fullTextAnnotation || null,
     confidence: getAverageConfidence(visionResponse),
     durationMs: Math.round(performance.now() - startedAt),
     provider: 'google_vision',

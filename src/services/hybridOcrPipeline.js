@@ -3,6 +3,7 @@ import {
   buildHeuristicContainerDetections,
   cropImageByDetection,
   generateOcrImageVariations,
+  resizeBase64ImageForOcr,
 } from '../utils/browserImageOcr.js';
 import {
   chooseBestContainerCandidate,
@@ -19,17 +20,33 @@ const extractFleetNumber = (rawText) => {
 
 const normalizeClassName = (className) => String(className || '').toLowerCase().trim();
 
-const getBoxFromAnnotation = (annotation) => {
-  const vertices = annotation.boundingPoly?.vertices || [];
+const runWithConcurrency = async (items, limit, handler) => {
+  const results = [];
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, limit || 1), items.length);
+
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await handler(items[currentIndex], currentIndex);
+    }
+  }));
+
+  return results;
+};
+
+const getBoxFromVertices = (text, vertices = []) => {
   const xs = vertices.map((vertex) => vertex.x ?? 0);
   const ys = vertices.map((vertex) => vertex.y ?? 0);
+  if (!xs.length || !ys.length) return null;
   const left = Math.min(...xs);
   const right = Math.max(...xs);
   const top = Math.min(...ys);
   const bottom = Math.max(...ys);
 
   return {
-    text: String(annotation.description || '').toUpperCase().replace(/[^A-Z0-9]/g, ''),
+    text: String(text || '').toUpperCase().replace(/[^A-Z0-9]/g, ''),
     left,
     right,
     top,
@@ -39,6 +56,28 @@ const getBoxFromAnnotation = (annotation) => {
     width: Math.max(1, right - left),
     height: Math.max(1, bottom - top),
   };
+};
+
+const getBoxFromAnnotation = (annotation) =>
+  getBoxFromVertices(annotation.description, annotation.boundingPoly?.vertices || []);
+
+const getSymbolBoxesFromFullTextAnnotation = (fullTextAnnotation) => {
+  const boxes = [];
+
+  (fullTextAnnotation?.pages || []).forEach((page) => {
+    (page.blocks || []).forEach((block) => {
+      (block.paragraphs || []).forEach((paragraph) => {
+        (paragraph.words || []).forEach((word) => {
+          (word.symbols || []).forEach((symbol) => {
+            const box = getBoxFromVertices(symbol.text, symbol.boundingBox?.vertices || word.boundingBox?.vertices || []);
+            if (box?.text) boxes.push(box);
+          });
+        });
+      });
+    });
+  });
+
+  return boxes;
 };
 
 const median = (values) => {
@@ -64,25 +103,36 @@ const clusterBoxes = (boxes, axis, tolerance) => {
   return clusters;
 };
 
-const extractSpatialTextsFromAnnotations = (textAnnotations = []) => {
-  const boxes = textAnnotations
-    .slice(1)
-    .map(getBoxFromAnnotation)
-    .filter((box) => box.text && box.text.length <= 12);
-
+const extractColumnTexts = (boxes, kind, toleranceMultiplier = 1.8) => {
   if (!boxes.length) return [];
 
-  const xTolerance = Math.max(12, median(boxes.map((box) => box.width)) * 1.8);
-  const yTolerance = Math.max(12, median(boxes.map((box) => box.height)) * 1.4);
-  const verticalTexts = clusterBoxes(boxes, 'centerX', xTolerance)
+  const xTolerance = Math.max(12, median(boxes.map((box) => box.width)) * toleranceMultiplier);
+  return clusterBoxes(boxes, 'centerX', xTolerance)
     .map((cluster) => ({
-      kind: 'vision_column',
+      kind,
       text: cluster.items
         .sort((a, b) => a.centerY - b.centerY)
         .map((box) => box.text)
         .join(''),
       size: cluster.items.length,
     }));
+};
+
+const extractSpatialTextsFromAnnotations = (textAnnotations = [], fullTextAnnotation = null) => {
+  const boxes = textAnnotations
+    .slice(1)
+    .map(getBoxFromAnnotation)
+    .filter(Boolean)
+    .filter((box) => box.text && box.text.length <= 12);
+  const symbolBoxes = getSymbolBoxesFromFullTextAnnotation(fullTextAnnotation);
+
+  if (!boxes.length && !symbolBoxes.length) return [];
+
+  const yTolerance = Math.max(12, median(boxes.map((box) => box.height)) * 1.4);
+  const verticalTexts = [
+    ...extractColumnTexts(boxes, 'vision_column', 1.8),
+    ...extractColumnTexts(symbolBoxes, 'vision_symbol_column', 2.8),
+  ];
 
   const horizontalTexts = clusterBoxes(boxes, 'centerY', yTolerance)
     .map((cluster) => ({
@@ -107,7 +157,7 @@ const runVisionAttempt = async ({ base64, transform, detection, crop, config }) 
   return {
     ...ocr,
     ...normalized,
-    spatialTexts: extractSpatialTextsFromAnnotations(ocr.textAnnotations),
+    spatialTexts: extractSpatialTextsFromAnnotations(ocr.textAnnotations, ocr.fullTextAnnotation),
     transform,
     detectionClass: detection?.class || '',
     detectionConfidence: detection?.confidence || 0,
@@ -118,7 +168,16 @@ const runVisionAttempt = async ({ base64, transform, detection, crop, config }) 
 };
 
 export const runHybridOcrPipeline = async (base64Image, customConfig = {}) => {
+  const pipelineStartedAt = performance.now();
   const config = { ...OCR_CONFIG, ...customConfig };
+  const legacyBenchmarkPromise = config.benchmarkLegacyFullImage
+    ? runGoogleVisionOcr(base64Image, config.googleVisionApiKey)
+      .then((result) => ({ durationMs: result.durationMs, rawTextLength: result.rawText.length }))
+      .catch((error) => ({ error: error.message }))
+    : null;
+  const resizeStartedAt = performance.now();
+  const ocrBase64Image = await resizeBase64ImageForOcr(base64Image, config);
+  const resizeDurationMs = Math.round(performance.now() - resizeStartedAt);
   const debug = {
     rawOcrTexts: [],
     detections: [],
@@ -126,11 +185,26 @@ export const runHybridOcrPipeline = async (base64Image, customConfig = {}) => {
     candidates: [],
     errors: [],
   };
+  const timing = {
+    resizeMs: resizeDurationMs,
+    roboflowMs: null,
+    fullImageVisionMs: null,
+    cropGenerationMs: 0,
+    cropVisionMs: 0,
+    cropVisionCalls: 0,
+    optimizedTotalMs: null,
+    legacyFullImageMs: null,
+    legacyFullImageError: '',
+    originalFallbackMs: null,
+    originalFallbackUsed: false,
+    originalFallbackError: '',
+  };
   const attempts = [];
 
   let roboflowResult = { detections: [] };
   try {
-    roboflowResult = await runRoboflowDetection(base64Image, config);
+    roboflowResult = await runRoboflowDetection(ocrBase64Image, config);
+    timing.roboflowMs = roboflowResult.durationMs ?? null;
     debug.detections = roboflowResult.detections || [];
     if (roboflowResult.skipped) debug.roboflowSkipped = roboflowResult.reason;
   } catch (error) {
@@ -140,10 +214,11 @@ export const runHybridOcrPipeline = async (base64Image, customConfig = {}) => {
   let fullImageAttempt = null;
   try {
     fullImageAttempt = await runVisionAttempt({
-      base64: base64Image,
+      base64: ocrBase64Image,
       transform: 'full_image',
       config,
     });
+    timing.fullImageVisionMs = fullImageAttempt.durationMs;
     attempts.push(fullImageAttempt);
   } catch (error) {
     debug.errors.push({ stage: 'vision_full_image', message: error.message });
@@ -158,7 +233,7 @@ export const runHybridOcrPipeline = async (base64Image, customConfig = {}) => {
 
   if (!containerDetections.length && config.enableHeuristicContainerCrop) {
     try {
-      containerDetections = (await buildHeuristicContainerDetections(base64Image))
+      containerDetections = (await buildHeuristicContainerDetections(ocrBase64Image))
         .slice(0, config.maxContainerDetections || 2);
       debug.heuristicContainerCrop = true;
     } catch (error) {
@@ -168,7 +243,8 @@ export const runHybridOcrPipeline = async (base64Image, customConfig = {}) => {
 
   for (const detection of containerDetections) {
     try {
-      const crop = await cropImageByDetection(base64Image, detection, config);
+      const cropStartedAt = performance.now();
+      const crop = await cropImageByDetection(ocrBase64Image, detection, config);
       debug.crops.push({
         detectionClass: detection.class,
         box: crop.box,
@@ -176,40 +252,73 @@ export const runHybridOcrPipeline = async (base64Image, customConfig = {}) => {
       });
 
       const variations = await generateOcrImageVariations(crop.base64, config, detection.class);
+      timing.cropGenerationMs += Math.round(performance.now() - cropStartedAt);
 
-      for (const variation of variations) {
-        try {
-          const attempt = await runVisionAttempt({
-            base64: variation.base64,
-            transform: variation.transform,
-            detection,
-            crop,
-            config,
-          });
-          attempts.push(attempt);
-          if (config.saveDebugCrops) {
-            debug.crops.push({
-              detectionClass: detection.class,
+      const cropAttempts = await runWithConcurrency(
+        variations,
+        config.googleVisionConcurrency,
+        async (variation) => {
+          try {
+            const attempt = await runVisionAttempt({
+              base64: variation.base64,
               transform: variation.transform,
-              box: crop.box,
-              image: variation.debugDataUrl,
+              detection,
+              crop,
+              config,
             });
+            if (config.saveDebugCrops) {
+              debug.crops.push({
+                detectionClass: detection.class,
+                transform: variation.transform,
+                box: crop.box,
+                image: variation.debugDataUrl,
+              });
+            }
+            return attempt;
+          } catch (error) {
+            debug.errors.push({
+              stage: 'vision_crop',
+              transform: variation.transform,
+              detectionClass: detection.class,
+              message: error.message,
+            });
+            return null;
           }
-        } catch (error) {
-          debug.errors.push({
-            stage: 'vision_crop',
-            transform: variation.transform,
-            detectionClass: detection.class,
-            message: error.message,
-          });
         }
-      }
+      );
+      const validCropAttempts = cropAttempts.filter(Boolean);
+      timing.cropVisionCalls += validCropAttempts.length;
+      timing.cropVisionMs += validCropAttempts.reduce((sum, attempt) => sum + (attempt.durationMs || 0), 0);
+      attempts.push(...validCropAttempts);
     } catch (error) {
       debug.errors.push({ stage: 'crop', detectionClass: detection.class, message: error.message });
     }
   }
 
-  const containerResult = chooseBestContainerCandidate(attempts);
+  let containerResult = chooseBestContainerCandidate(attempts);
+  let originalFallbackAttempt = null;
+  if (!containerResult.containerCode && config.enableOriginalFallback) {
+    try {
+      originalFallbackAttempt = await runVisionAttempt({
+        base64: base64Image,
+        transform: 'full_image_original_fallback',
+        config,
+      });
+      timing.originalFallbackMs = originalFallbackAttempt.durationMs;
+      timing.originalFallbackUsed = true;
+      attempts.push(originalFallbackAttempt);
+      containerResult = chooseBestContainerCandidate(attempts);
+    } catch (error) {
+      timing.originalFallbackError = error.message;
+      debug.errors.push({ stage: 'vision_original_fallback', message: error.message });
+    }
+  }
+  timing.optimizedTotalMs = Math.round(performance.now() - pipelineStartedAt);
+  if (legacyBenchmarkPromise) {
+    const legacyBenchmark = await legacyBenchmarkPromise;
+    timing.legacyFullImageMs = legacyBenchmark.durationMs ?? null;
+    timing.legacyFullImageError = legacyBenchmark.error || '';
+  }
   debug.rawOcrTexts = attempts.map((attempt) => ({
     rawText: attempt.rawText,
     normalizedText: attempt.normalizedText,
@@ -221,8 +330,9 @@ export const runHybridOcrPipeline = async (base64Image, customConfig = {}) => {
   }));
   debug.candidates = containerResult.alternatives;
 
-  const plateResult = normalizeBrazilianPlate(fullImageAttempt?.rawText || '');
-  const fleetNumber = extractFleetNumber(fullImageAttempt?.rawText || '');
+  const fullImageText = fullImageAttempt?.rawText || originalFallbackAttempt?.rawText || '';
+  const plateResult = normalizeBrazilianPlate(fullImageText);
+  const fleetNumber = extractFleetNumber(fullImageText);
 
   return {
     containerCode: containerResult.containerCode,
@@ -233,6 +343,7 @@ export const runHybridOcrPipeline = async (base64Image, customConfig = {}) => {
     ambiguous: containerResult.ambiguous,
     ambiguityReason: containerResult.ambiguityReason,
     alternatives: containerResult.alternatives,
+    timing: config.enableTimingDebug ? timing : null,
     plate: plateResult?.text || '',
     plateConfidence: plateResult ? Math.max(0, Math.min(0.99, plateResult.score / 110)) : 0,
     fleetNumber,
