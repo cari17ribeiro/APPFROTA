@@ -3,6 +3,26 @@ import { Camera, Image as ImageIcon, AlertCircle, Loader2, XCircle, ArrowRight, 
 import { runHybridOcrPipeline } from '../services/hybridOcrPipeline.js';
 import { isValidContainerCode, normalizeOcrText } from '../utils/ocrNormalization.js';
 
+const booleanFromEnv = (value, fallback = false) => {
+  if (value === undefined || value === null || value === '') return fallback;
+  return String(value).toLowerCase() === 'true';
+};
+
+const getValidContainerAlternatives = (alternatives = []) =>
+  Array.from(
+    new Map(
+      alternatives
+        .filter((candidate) =>
+          candidate.text &&
+          candidate.regexValid &&
+          candidate.ownerCategoryValid &&
+          candidate.freightContainerCategory &&
+          candidate.checkDigitValid
+        )
+        .map((candidate) => [candidate.text, candidate])
+    ).values()
+  ).slice(0, 4);
+
 export default function ExtraTripScreen({ currentUser, onClose, supabase }) {
   const [step, setStep] = useState(1);
   
@@ -172,8 +192,10 @@ export default function ExtraTripScreen({ currentUser, onClose, supabase }) {
       setOcrResult(result);
       if (import.meta.env.VITE_OCR_DEBUG === 'true') console.debug('OCR debug:', result.debug);
 
-      if (result.containerCode) {
-        setContainer(result.containerCode);
+      const firstAlternative = getValidContainerAlternatives(result.alternatives)[0]?.text || '';
+      const containerCandidate = result.containerCode || firstAlternative;
+      if (containerCandidate) {
+        setContainer(containerCandidate);
         setContainerConfirmed(false);
       }
       if (result.plate) setPlaca(result.plate);
@@ -253,21 +275,18 @@ export default function ExtraTripScreen({ currentUser, onClose, supabase }) {
   };
 
   const isDestinoBloqueado = tipoOperacao === 'REMOÇÃO' || tipoOperacao === 'PESAGEM';
-  const containerAlternatives = Array.from(
-    new Map(
-      (ocrResult?.alternatives || [])
-        .filter((candidate) =>
-          candidate.text &&
-          candidate.regexValid &&
-          candidate.ownerCategoryValid &&
-          candidate.freightContainerCategory &&
-          candidate.checkDigitValid
-        )
-        .map((candidate) => [candidate.text, candidate])
-    ).values()
-  ).slice(0, 4);
+  const showOcrDebugPanel = booleanFromEnv(import.meta.env.VITE_OCR_SHOW_DEBUG_PANEL, false);
+  const showIsoAlternatives = booleanFromEnv(import.meta.env.VITE_OCR_SHOW_ISO_ALTERNATIVES, false);
+  const containerAlternatives = getValidContainerAlternatives(ocrResult?.alternatives || []);
   const containerManualValid = container ? isValidContainerCode(container) : false;
-  const showAmbiguousWarning = ocrResult?.ambiguous && !containerConfirmed;
+  const showAmbiguousWarning = showIsoAlternatives && ocrResult?.ambiguous && !containerConfirmed;
+  const showOcrDebug = Boolean(ocrResult?.debug) && showOcrDebugPanel;
+  const debugAttempts = ocrResult?.debug?.rawOcrTexts || [];
+  const debugCandidates = ocrResult?.debug?.candidates || [];
+  const compactDebugText = (value) => {
+    const compact = String(value || '').replace(/\s+/g, ' ').trim();
+    return compact.length > 140 ? `${compact.slice(0, 140)}...` : compact;
+  };
 
   return (
     <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 sm:p-6 overflow-y-auto">
@@ -441,7 +460,7 @@ export default function ExtraTripScreen({ currentUser, onClose, supabase }) {
                           <span>Leitura ambígua. Confirme uma opção abaixo.</span>
                         </div>
                       )}
-                      {containerAlternatives.length > 0 && (
+                      {showIsoAlternatives && containerAlternatives.length > 0 && (
                         <div className="mt-3 space-y-2">
                           <span className="text-[10px] font-black text-slate-400 block uppercase tracking-wider">Alternativas ISO</span>
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -476,6 +495,69 @@ export default function ExtraTripScreen({ currentUser, onClose, supabase }) {
                       <div className="text-xs bg-indigo-50 text-indigo-700 p-2.5 rounded-xl font-bold flex items-center border border-indigo-100 mt-2">
                         <Search className="w-4 h-4 mr-2 shrink-0" /> Vinculado: Placa {placa} | Carreta {carreta}
                       </div>
+                    )}
+                    {showOcrDebugPanel && ocrResult?.timing && (
+                      <div className="text-[11px] bg-slate-50 text-slate-500 p-2.5 rounded-xl font-bold border border-slate-200">
+                        <div className="flex justify-between gap-3">
+                          <span>OCR atual</span>
+                          <span>{(ocrResult.timing.optimizedTotalMs / 1000).toFixed(1)}s</span>
+                        </div>
+                        <div className="flex justify-between gap-3">
+                          <span>Original</span>
+                          <span>
+                            {ocrResult.timing.legacyFullImageMs
+                              ? `${(ocrResult.timing.legacyFullImageMs / 1000).toFixed(1)}s`
+                              : 'n/d'}
+                          </span>
+                        </div>
+                        <div className="mt-1 text-[10px] text-slate-400">
+                          Roboflow {ocrResult.timing.roboflowMs ? `${(ocrResult.timing.roboflowMs / 1000).toFixed(1)}s` : 'n/d'} · Vision crop {ocrResult.timing.cropVisionCalls}x
+                        </div>
+                      </div>
+                    )}
+                    {showOcrDebug && (
+                      <details className="text-[11px] bg-slate-900 text-slate-100 p-3 rounded-xl border border-slate-700">
+                        <summary className="cursor-pointer font-black uppercase tracking-wider text-slate-300">
+                          Debug OCR temporário
+                        </summary>
+                        <div className="mt-3 space-y-3">
+                          <div>
+                            <span className="block text-slate-400 font-black mb-1">Candidatos</span>
+                            <div className="space-y-1">
+                              {debugCandidates.slice(0, 8).map((candidate, index) => (
+                                <div key={`${candidate.text}-${index}`} className="rounded-lg bg-slate-800 p-2">
+                                  <div className="flex justify-between gap-2">
+                                    <span className="font-black text-white">{candidate.text}</span>
+                                    <span className="text-slate-400">score {Math.round(candidate.score || 0)}</span>
+                                  </div>
+                                  <div className="text-slate-400">
+                                    {candidate.transform} · {candidate.candidateSource} · check {candidate.checkDigitValid ? 'ok' : 'falhou'}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <span className="block text-slate-400 font-black mb-1">Tentativas Vision</span>
+                            <div className="space-y-1">
+                              {debugAttempts.slice(0, 10).map((attempt, index) => (
+                                <div key={`${attempt.transform}-${index}`} className="rounded-lg bg-slate-800 p-2">
+                                  <div className="flex justify-between gap-2">
+                                    <span className="font-black text-white">{attempt.transform}</span>
+                                    <span className="text-slate-400">{attempt.durationMs ? `${(attempt.durationMs / 1000).toFixed(1)}s` : 'n/d'}</span>
+                                  </div>
+                                  <div className="text-slate-300">{compactDebugText(attempt.rawText || attempt.normalizedText)}</div>
+                                  {attempt.spatialTexts?.length > 0 && (
+                                    <div className="mt-1 text-slate-400">
+                                      {attempt.spatialTexts.slice(0, 3).map((item) => `${item.kind}:${item.text}`).join(' | ')}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </details>
                     )}
                   </div>
                 </div>

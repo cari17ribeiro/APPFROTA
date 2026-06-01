@@ -110,6 +110,23 @@ test('corrige apenas o dígito verificador quando os 10 primeiros caracteres sã
   assert.equal(result.isCheckDigitValid, true);
 });
 
+test('não aplica reparo de dígito verificador em leitura vertical por coluna', () => {
+  const result = chooseBestContainerCandidate([
+    {
+      rawText: '',
+      normalizedText: '',
+      spatialTexts: [{ kind: 'vision_column', text: 'HAMU2988431' }],
+      transform: 'original',
+      detectionClass: 'container_number',
+      confidence: 0.9,
+      requireFreightContainerCategory: true,
+    },
+  ]);
+
+  assert.equal(result.containerCode, '');
+  assert.equal(result.alternatives.some((candidate) => candidate.text === 'HAMU2988437'), false);
+});
+
 test('prefere candidato espacial de coluna vertical sobre falso positivo da imagem inteira', () => {
   const result = chooseBestContainerCandidate([
     {
@@ -125,6 +142,39 @@ test('prefere candidato espacial de coluna vertical sobre falso positivo da imag
       transform: 'original',
       detectionClass: 'container_code_vertical_heuristic',
       confidence: 0.78,
+    },
+  ]);
+
+  assert.equal(result.containerCode, 'HAMU2984347');
+  assert.equal(result.isCheckDigitValid, true);
+});
+
+test('recombina prefixo vertical confiável com sufixo visto em outras tentativas', () => {
+  const result = chooseBestContainerCandidate([
+    {
+      rawText: '563 HAMU 843 298 GJM 2H72 CCHINI',
+      normalizedText: '563HAMU843298GJM2H72CCHINI',
+      spatialTexts: [
+        { kind: 'vision_column', text: 'HAMU298843GJM2H72CCHINI' },
+        { kind: 'vision_symbol_column', text: 'HAMU892348GJM2H7CCHINI' },
+      ],
+      transform: 'full_image',
+      confidence: 0.8,
+      requireFreightContainerCategory: true,
+    },
+    {
+      rawText: '788 1434 HAWH',
+      normalizedText: '7881434HAWH',
+      transform: 'rotate_90',
+      confidence: 0.6,
+      requireFreightContainerCategory: true,
+    },
+    {
+      rawText: '843 469 HAVM',
+      normalizedText: '843469HAVM',
+      transform: 'rotate_90_contrast',
+      confidence: 0.6,
+      requireFreightContainerCategory: true,
     },
   ]);
 
