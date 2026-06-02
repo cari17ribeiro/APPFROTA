@@ -356,7 +356,7 @@ export default function AdminDashboard({ viagens, pendentes, setPendentes, premi
     }
   };
 
-  const handleExportarExtras = async () => {
+ const handleExportarExtras = async () => {
     if (!dataInicioExtra || !dataFimExtra) {
       alert("Por favor, selecione a data inicial e final.");
       return;
@@ -364,20 +364,41 @@ export default function AdminDashboard({ viagens, pendentes, setPendentes, premi
 
     setIsExportingExtra(true);
     try {
-      // Adicionamos 23:59:59 à data final para garantir que o Supabase 
-      // inclua todas as viagens até o último segundo do dia selecionado
-      const dataFimAjustada = `${dataFimExtra} 23:59:59`;
-
-      // Adicionada a coluna 'status' no select
+      
       const { data, error } = await supabase
         .from('viagens_extra')
-        .select('tipo_operacao, origem, destino, container, placa, motorista, data, hora, status')
-        .gte('data', dataInicioExtra)
-        .lte('data', dataFimAjustada);
+        .select('tipo_operacao, origem, destino, container, placa, motorista, data, hora, status');
 
       if (error) throw error;
 
       if (!data || data.length === 0) {
+        alert("A tabela de viagens extras está vazia no banco de dados.");
+        setIsExportingExtra(false);
+        return;
+      }
+
+      const dataInicio = new Date(`${dataInicioExtra}T00:00:00`);
+      const dataFim = new Date(`${dataFimExtra}T23:59:59`);
+
+      const dadosFiltrados = data.filter(item => {
+        if (!item.data) return false;
+        
+        let dataItem;
+        if (item.data.includes('/')) {
+          const [d, m, a] = item.data.split(' ')[0].split('/');
+          dataItem = new Date(a, m - 1, d);
+        } 
+        else if (item.data.includes('-')) {
+          const [a, m, d] = item.data.split(' ')[0].split('-');
+          dataItem = new Date(a, m - 1, d);
+        } else {
+          dataItem = new Date(item.data);
+        }
+
+        return dataItem >= dataInicio && dataItem <= dataFim;
+      });
+
+      if (dadosFiltrados.length === 0) {
         alert("Nenhuma viagem extra encontrada neste período.");
         setIsExportingExtra(false);
         return;
@@ -389,11 +410,10 @@ export default function AdminDashboard({ viagens, pendentes, setPendentes, premi
         return;
       }
 
-      const ws = window.XLSX.utils.json_to_sheet(data);
+      const ws = window.XLSX.utils.json_to_sheet(dadosFiltrados);
       const wb = window.XLSX.utils.book_new();
       window.XLSX.utils.book_append_sheet(wb, ws, "Viagens Extras");
       
-      // Formata o nome do arquivo para DD-MM-YYYY para ficar mais organizado
       const formatNome = (dt) => dt.split('-').reverse().join('-');
       window.XLSX.writeFile(wb, `Extras_${formatNome(dataInicioExtra)}_ate_${formatNome(dataFimExtra)}.xlsx`);
       
