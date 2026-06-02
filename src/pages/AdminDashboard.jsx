@@ -13,6 +13,10 @@ export default function AdminDashboard({ viagens, pendentes, setPendentes, premi
   const [viewImageUrl, setViewImageUrl] = useState(null);
   const [mesImportacao, setMesImportacao] = useState('');
   const [isImportingUnificado, setIsImportingUnificado] = useState(false);
+  const [isExportExtraOpen, setIsExportExtraOpen] = useState(false);
+  const [dataInicioExtra, setDataInicioExtra] = useState('');
+  const [dataFimExtra, setDataFimExtra] = useState('');
+  const [isExportingExtra, setIsExportingExtra] = useState(false);
 
   const [nomeMotorista, setNomeMotorista] = useState('');
   const [emailMotorista, setEmailMotorista] = useState('');
@@ -352,6 +356,47 @@ export default function AdminDashboard({ viagens, pendentes, setPendentes, premi
     }
   };
 
+  const handleExportarExtras = async () => {
+    if (!dataInicioExtra || !dataFimExtra) {
+      alert("Por favor, selecione a data inicial e final.");
+      return;
+    }
+
+    setIsExportingExtra(true);
+    try {
+      const { data, error } = await supabase
+        .from('viagens_extra')
+        .select('tipo_operacao, origem, destino, container, placa, motorista, data, hora')
+        .gte('data', dataInicioExtra)
+        .lte('data', dataFimExtra);
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        alert("Nenhuma viagem extra encontrada neste período.");
+        setIsExportingExtra(false);
+        return;
+      }
+
+      if (!window.XLSX) {
+        alert('A biblioteca do Excel está a carregar. Tente novamente.');
+        setIsExportingExtra(false);
+        return;
+      }
+
+      const ws = window.XLSX.utils.json_to_sheet(data);
+      const wb = window.XLSX.utils.book_new();
+      window.XLSX.utils.book_append_sheet(wb, ws, "Viagens Extras");
+      window.XLSX.writeFile(wb, `Extras_${dataInicioExtra}_ate_${dataFimExtra}.xlsx`);
+      
+      setIsExportExtraOpen(false);
+    } catch (error) {
+      alert("Erro ao exportar extras: " + error.message);
+    } finally {
+      setIsExportingExtra(false);
+    }
+  };
+
   return (
     <div className="space-y-8">
       <div className="flex flex-col lg:flex-row lg:justify-between lg:items-end gap-6">
@@ -384,6 +429,15 @@ export default function AdminDashboard({ viagens, pendentes, setPendentes, premi
             {premiosLiberados ? <Unlock className="w-5 h-5" /> : <Lock className="w-5 h-5" />}
             <span>{premiosLiberados ? 'Prémios Visíveis' : 'Libertar Prémios (Oculto)'}</span>
           </button>
+
+          <button
+            onClick={() => setIsExportExtraOpen(true)}
+            className="flex items-center justify-center space-x-2.5 px-6 py-3 rounded-2xl font-bold transition-all shadow-sm border bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 ring-4 ring-indigo-500/10"
+          >
+            <Download className="w-5 h-5" />
+            <span>Exportar Extras</span>
+          </button>
+          
         </div>
       </div>
 
@@ -723,6 +777,44 @@ export default function AdminDashboard({ viagens, pendentes, setPendentes, premi
           </div>
         </div>
       )}
+
+      {isExportExtraOpen && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md flex items-center justify-center z-[100] p-4" onClick={() => setIsExportExtraOpen(false)}>
+          <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl flex flex-col gap-6 animate-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center border-b border-slate-100 pb-4">
+              <h3 className="text-xl font-black text-slate-800 flex items-center">
+                <FileSpreadsheet className="w-6 h-6 mr-2 text-indigo-600" />
+                Exportar Extras
+              </h3>
+              <button onClick={() => setIsExportExtraOpen(false)} className="text-slate-400 hover:text-rose-500 transition-colors">
+                <XCircle className="w-6 h-6" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">Período Inicial</label>
+                <input type="date" value={dataInicioExtra} onChange={e => setDataInicioExtra(e.target.value)} className="w-full border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500/20 border bg-slate-50" />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">Período Final</label>
+                <input type="date" value={dataFimExtra} onChange={e => setDataFimExtra(e.target.value)} className="w-full border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500/20 border bg-slate-50" />
+              </div>
+            </div>
+            
+            <div className="pt-2 flex gap-3">
+              <button onClick={() => setIsExportExtraOpen(false)} className="flex-1 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 py-3 rounded-xl font-bold transition-colors">
+                Cancelar
+              </button>
+              <button onClick={handleExportarExtras} disabled={isExportingExtra} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl font-bold transition-all shadow-md flex items-center justify-center">
+                {isExportingExtra ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <Download className="w-5 h-5 mr-2" />}
+                {isExportingExtra ? 'A Extrair...' : 'Extrair Relatório'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
     </div>
   );
 }
