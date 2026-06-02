@@ -364,11 +364,16 @@ export default function AdminDashboard({ viagens, pendentes, setPendentes, premi
 
     setIsExportingExtra(true);
     try {
+      // Adicionamos 23:59:59 à data final para garantir que o Supabase 
+      // inclua todas as viagens até o último segundo do dia selecionado
+      const dataFimAjustada = `${dataFimExtra} 23:59:59`;
+
+      // Adicionada a coluna 'status' no select
       const { data, error } = await supabase
         .from('viagens_extra')
-        .select('tipo_operacao, origem, destino, container, placa, motorista, data, hora')
+        .select('tipo_operacao, origem, destino, container, placa, motorista, data, hora, status')
         .gte('data', dataInicioExtra)
-        .lte('data', dataFimExtra);
+        .lte('data', dataFimAjustada);
 
       if (error) throw error;
 
@@ -387,8 +392,11 @@ export default function AdminDashboard({ viagens, pendentes, setPendentes, premi
       const ws = window.XLSX.utils.json_to_sheet(data);
       const wb = window.XLSX.utils.book_new();
       window.XLSX.utils.book_append_sheet(wb, ws, "Viagens Extras");
-      window.XLSX.writeFile(wb, `Extras_${dataInicioExtra}_ate_${dataFimExtra}.xlsx`);
       
+      // Formata o nome do arquivo para DD-MM-YYYY para ficar mais organizado
+      const formatNome = (dt) => dt.split('-').reverse().join('-');
+      window.XLSX.writeFile(wb, `Extras_${formatNome(dataInicioExtra)}_ate_${formatNome(dataFimExtra)}.xlsx`);
+      
       setIsExportExtraOpen(false);
     } catch (error) {
       alert("Erro ao exportar extras: " + error.message);
