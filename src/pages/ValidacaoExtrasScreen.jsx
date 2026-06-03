@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Loader2, Search, CheckCircle, AlertCircle, Image as ImageIcon, XCircle, Save, Filter, ArrowRight, BarChart3, ListTodo, Download, FileSpreadsheet } from 'lucide-react';
+import { Loader2, Search, CheckCircle, AlertCircle, Image as ImageIcon, XCircle, Save, Filter, ArrowRight, BarChart3, ListTodo, Download, FileSpreadsheet, PieChart } from 'lucide-react';
 
 export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
   const [activeTab, setActiveTab] = useState('validacao');
@@ -22,7 +22,7 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
   const [editCarreta, setEditCarreta] = useState('');
 
   // Dashboard States
-  const [dashMetrics, setDashMetrics] = useState({ total: 0, acertos: 0, taxa: 0 });
+  const [dashMetrics, setDashMetrics] = useState({ total: 0, acertos: 0, erros: 0, taxa: 0 });
   const [loadingDash, setLoadingDash] = useState(false);
 
   // Export States
@@ -79,8 +79,13 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
       if (data) {
         const total = data.length;
         const acertos = data.filter(v => v.ocr_correto === true).length;
-        const taxa = total > 0 ? ((acertos / total) * 100).toFixed(1) : 0;
-        setDashMetrics({ total, acertos, taxa });
+        const erros = data.filter(v => v.ocr_correto === false).length;
+        
+        // Total avaliado ignora as viagens muito antigas onde a coluna ocr_correto era nula
+        const totalAvaliados = acertos + erros; 
+        const taxa = totalAvaliados > 0 ? ((acertos / totalAvaliados) * 100).toFixed(1) : 0;
+        
+        setDashMetrics({ total, acertos, erros, taxa });
       }
     } catch (error) {
       console.error("Erro ao carregar dashboard:", error);
@@ -119,7 +124,7 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
           frota: editFrota.trim().toUpperCase(),
           carreta: editCarreta.trim().toUpperCase(),
           status: 'Validado',
-          ocr_correto: ocrAcertou // Salva no banco se foi acerto ou correção
+          ocr_correto: ocrAcertou // Salva no banco se foi acerto(true) ou correção(false)
         })
         .eq('id', viagemSelecionada.id);
 
@@ -378,29 +383,90 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
             {loadingDash ? (
                <div className="p-20 text-center"><Loader2 className="w-8 h-8 animate-spin mx-auto text-blue-500" /></div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="flex flex-col gap-6">
                 
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center">
-                  <span className="text-sm font-bold text-slate-500 uppercase mb-2">Total de Validações</span>
-                  <div className="text-5xl font-black text-slate-800">{dashMetrics.total}</div>
-                  <p className="text-sm text-slate-400 mt-2 font-medium">Viagens extras aprovadas</p>
+                {/* 4 CARDS SUPERIORES */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                  
+                  <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center">
+                    <span className="text-sm font-bold text-slate-500 uppercase mb-2">Total de Validações</span>
+                    <div className="text-5xl font-black text-slate-800">{dashMetrics.total}</div>
+                    <p className="text-sm text-slate-400 mt-2 font-medium">Viagens na base</p>
+                  </div>
+
+                  <div className="bg-emerald-50 p-6 rounded-2xl border border-emerald-200 shadow-sm flex flex-col justify-center relative overflow-hidden">
+                    <span className="text-sm font-bold text-emerald-700 uppercase mb-2 relative z-10">Acertos da IA</span>
+                    <div className="text-5xl font-black text-emerald-600 relative z-10">{dashMetrics.acertos}</div>
+                    <p className="text-sm text-emerald-700/70 mt-2 font-medium relative z-10">Lidos corretamente</p>
+                    <CheckCircle className="w-32 h-32 absolute -right-6 -bottom-6 text-emerald-500/10" />
+                  </div>
+
+                  <div className="bg-rose-50 p-6 rounded-2xl border border-rose-200 shadow-sm flex flex-col justify-center relative overflow-hidden">
+                    <span className="text-sm font-bold text-rose-700 uppercase mb-2 relative z-10">Erros da IA</span>
+                    <div className="text-5xl font-black text-rose-600 relative z-10">{dashMetrics.erros}</div>
+                    <p className="text-sm text-rose-700/70 mt-2 font-medium relative z-10">Corrigidos manualmente</p>
+                    <AlertCircle className="w-32 h-32 absolute -right-6 -bottom-6 text-rose-500/10" />
+                  </div>
+
+                  <div className={`p-6 rounded-2xl border shadow-sm flex flex-col justify-center relative overflow-hidden ${dashMetrics.taxa >= 80 ? 'bg-blue-50 border-blue-200' : 'bg-amber-50 border-amber-200'}`}>
+                    <span className={`text-sm font-bold uppercase mb-2 relative z-10 ${dashMetrics.taxa >= 80 ? 'text-blue-700' : 'text-amber-700'}`}>Taxa de Precisão</span>
+                    <div className={`text-5xl font-black relative z-10 ${dashMetrics.taxa >= 80 ? 'text-blue-600' : 'text-amber-600'}`}>{dashMetrics.taxa}%</div>
+                    <div className="w-full bg-black/5 rounded-full h-2 mt-4 relative z-10">
+                       <div className={`h-2 rounded-full transition-all duration-1000 ${dashMetrics.taxa >= 80 ? 'bg-blue-500' : 'bg-amber-500'}`} style={{ width: `${dashMetrics.taxa}%` }}></div>
+                    </div>
+                  </div>
+                  
                 </div>
 
-                <div className="bg-emerald-50 p-6 rounded-2xl border border-emerald-200 shadow-sm flex flex-col justify-center relative overflow-hidden">
-                  <span className="text-sm font-bold text-emerald-700 uppercase mb-2 relative z-10">Acertos da IA (Sem Correção)</span>
-                  <div className="text-5xl font-black text-emerald-600 relative z-10">{dashMetrics.acertos}</div>
-                  <p className="text-sm text-emerald-700/70 mt-2 font-medium relative z-10">Lidos corretamente na 1ª vez</p>
-                  <CheckCircle className="w-32 h-32 absolute -right-6 -bottom-6 text-emerald-500/10" />
-                </div>
-
-                <div className={`p-6 rounded-2xl border shadow-sm flex flex-col justify-center relative overflow-hidden ${dashMetrics.taxa >= 80 ? 'bg-blue-50 border-blue-200' : 'bg-amber-50 border-amber-200'}`}>
-                  <span className={`text-sm font-bold uppercase mb-2 relative z-10 ${dashMetrics.taxa >= 80 ? 'text-blue-700' : 'text-amber-700'}`}>Taxa de Precisão</span>
-                  <div className={`text-5xl font-black relative z-10 ${dashMetrics.taxa >= 80 ? 'text-blue-600' : 'text-amber-600'}`}>{dashMetrics.taxa}%</div>
-                  <div className="w-full bg-black/5 rounded-full h-2 mt-4 relative z-10">
-                     <div className={`h-2 rounded-full ${dashMetrics.taxa >= 80 ? 'bg-blue-500' : 'bg-amber-500'}`} style={{ width: `${dashMetrics.taxa}%` }}></div>
+                {/* GRÁFICO DE PIZZA (DONUT) SVG */}
+                <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row items-center justify-center gap-12">
+                  <div className="relative w-56 h-56">
+                    <svg viewBox="0 0 36 36" className="w-full h-full transform -rotate-90 drop-shadow-md">
+                      {/* Fundo (Erros - Rose) */}
+                      <circle cx="18" cy="18" r="15.91549430918954" fill="transparent" stroke="#fda4af" strokeWidth="5" />
+                      {/* Preenchimento (Acertos - Emerald) */}
+                      <circle 
+                        cx="18" 
+                        cy="18" 
+                        r="15.91549430918954" 
+                        fill="transparent" 
+                        stroke="#10b981" 
+                        strokeWidth="5" 
+                        strokeDasharray={`${dashMetrics.taxa} ${100 - dashMetrics.taxa}`} 
+                        strokeDashoffset="0" 
+                        className="transition-all duration-1000 ease-out"
+                      />
+                    </svg>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                      <span className="text-3xl font-black text-slate-800">{dashMetrics.taxa}%</span>
+                      <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Acertos</span>
+                    </div>
+                  </div>
+                  
+                  {/* LEGENDA DO GRÁFICO */}
+                  <div className="flex flex-col gap-6">
+                    <h3 className="text-lg font-black text-slate-800 flex items-center mb-2">
+                      <PieChart className="w-5 h-5 mr-2 text-indigo-500"/> Proporção de Desempenho
+                    </h3>
+                    
+                    <div className="flex items-center gap-4 bg-emerald-50/50 p-4 rounded-xl border border-emerald-100 w-full sm:w-80">
+                      <div className="w-5 h-5 rounded-full bg-emerald-500 shadow-sm shrink-0"></div>
+                      <div>
+                        <p className="font-bold text-slate-800">Acertos da IA</p>
+                        <p className="text-sm text-slate-500 font-medium">{dashMetrics.acertos} viagens validadas diretamente</p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-4 bg-rose-50/50 p-4 rounded-xl border border-rose-100 w-full sm:w-80">
+                      <div className="w-5 h-5 rounded-full bg-rose-400 shadow-sm shrink-0"></div>
+                      <div>
+                        <p className="font-bold text-slate-800">Erros (Corrigidos)</p>
+                        <p className="text-sm text-slate-500 font-medium">{dashMetrics.erros} viagens exigiram ajuste humano</p>
+                      </div>
+                    </div>
                   </div>
                 </div>
-                
+
               </div>
             )}
           </div>
