@@ -11,8 +11,9 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
   const [filtroDataFim, setFiltroDataFim] = useState('');
   const [filtroMotorista, setFiltroMotorista] = useState(''); 
   
-  // Modal de Edição
+  // Modais
   const [viagemSelecionada, setViagemSelecionada] = useState(null);
+  const [justificativaModal, setJustificativaModal] = useState(null); // Novo estado para ler a justificativa
   const [isSaving, setIsSaving] = useState(false);
 
   // Estados editáveis do modal
@@ -346,16 +347,30 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
                           <td className="p-4 text-slate-600">
                             {viagem.origem} <ArrowRight className="inline w-3 h-3 text-slate-400 mx-1"/> {viagem.destino}
                           </td>
-                          <td className="p-4 text-center">
-                            {falhaOCR ? (
-                              <span className="inline-flex items-center px-2 py-1 bg-amber-100 text-amber-700 rounded-md text-xs font-bold">
-                                <AlertCircle className="w-3 h-3 mr-1" /> Revisão Necessária
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center px-2 py-1 bg-emerald-100 text-emerald-700 rounded-md text-xs font-bold">
-                                <CheckCircle className="w-3 h-3 mr-1" /> IA Completa
-                              </span>
-                            )}
+                          <td className="p-4">
+                            <div className="flex flex-col gap-2 items-center justify-center">
+                              {falhaOCR ? (
+                                <span className="inline-flex items-center px-2 py-1 bg-amber-100 text-amber-700 rounded-md text-xs font-bold">
+                                  <AlertCircle className="w-3 h-3 mr-1" /> Revisão Necessária
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-2 py-1 bg-emerald-100 text-emerald-700 rounded-md text-xs font-bold">
+                                  <CheckCircle className="w-3 h-3 mr-1" /> IA Completa
+                                </span>
+                              )}
+
+                              {/* NOVA ETIQUETA DE GALERIA AQUI */}
+                              {viagem.photo_source === 'galeria' && (
+                                <button
+                                  onClick={() => setJustificativaModal(viagem.justificativa || 'Nenhuma justificativa fornecida pelo motorista.')}
+                                  className="inline-flex items-center px-2 py-1 bg-purple-100 hover:bg-purple-200 text-purple-700 rounded-md text-xs font-bold transition-colors cursor-pointer shadow-sm border border-purple-200"
+                                  title="Ver Justificativa"
+                                >
+                                  <ImageIcon className="w-3 h-3 mr-1" />
+                                  Galeria
+                                </button>
+                              )}
+                            </div>
                           </td>
                           <td className="p-4 text-right">
                             <button 
@@ -473,6 +488,24 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
         )}
 
       </main>
+
+      {/* ================= MODAL DE JUSTIFICATIVA (NOVO) ================= */}
+      {justificativaModal && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md flex items-center justify-center z-[100] p-4" onClick={() => setJustificativaModal(null)}>
+          <div className="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl flex flex-col gap-4 animate-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center text-purple-600 mb-2">
+              <AlertCircle className="w-6 h-6 mr-2" />
+              <h3 className="text-lg font-black text-slate-800">Aviso da Galeria</h3>
+            </div>
+            <p className="text-slate-600 font-medium leading-relaxed bg-slate-50 p-4 rounded-xl border border-slate-100">
+              {justificativaModal}
+            </p>
+            <button onClick={() => setJustificativaModal(null)} className="mt-2 w-full bg-slate-900 hover:bg-slate-800 text-white py-3 rounded-xl font-bold transition-colors shadow-md">
+              Fechar
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ================= MODAL DE EXPORTAÇÃO ================= */}
       {isExportExtraOpen && (
