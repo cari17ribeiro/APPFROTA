@@ -232,7 +232,7 @@ export default function AdminDashboard({ viagens, pendentes, setPendentes, premi
             });
           };
 
-          processarAbaViagens('IMP', 'IMPO', { mot: 'I', orig: 'C', dest: 'P', cont: 'D', data: 'K' });
+          processarAbaViagens('IMP', 'IMPO', { mot: 'J', orig: 'C', dest: 'P', cont: 'D', data: 'L' });
           processarAbaViagens('EXP', 'EXPO', { mot: 'I', orig: 'B', dest: 'C', cont: 'D', data: 'L' });
           processarAbaViagens('EXT', 'EXTRA', { mot: 'G', orig: 'C', dest: 'D', cont: 'E', data: 'H' });
 
