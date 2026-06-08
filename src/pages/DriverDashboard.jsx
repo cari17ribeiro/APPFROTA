@@ -262,7 +262,7 @@ export default function DriverDashboard({ currentUser, viagens, setViagens, pend
               onClick={() => setAbaHistorico('extras')}
               className={`pb-3 text-lg font-bold transition-colors relative flex items-center gap-2 ${abaHistorico === 'extras' ? 'text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
             >
-              Extras Via IA
+              Extras Enviados
               {extrasEnviados.length > 0 && (
                 <span className={`px-2 py-0.5 rounded-full text-[10px] ${abaHistorico === 'extras' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-200 text-slate-500'}`}>
                   {extrasEnviados.length}
