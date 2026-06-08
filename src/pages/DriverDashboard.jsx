@@ -1,22 +1,48 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Clock, Award, FileText, Package, Droplet, ChevronRight, 
   AlertCircle, Plus, Filter, Truck, CheckCircle, XCircle, 
-  MessageSquare, Image as ImageIcon, Camera // <-- Camera adicionada aqui
+  MessageSquare, Image as ImageIcon, Camera 
 } from 'lucide-react';
 import StatCard from '../components/StatCard.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
 import AddTripModal from '../components/AddTripModal.jsx';
-import ExtraTripScreen from './ExtraTripScreen.jsx'; // <-- Nova importação aqui
+import ExtraTripScreen from './ExtraTripScreen.jsx'; 
 import { calcularPeriodoViagem } from '../utils/periodos.js';
 
 export default function DriverDashboard({ currentUser, viagens, setViagens, pendentes, setPendentes, resumos, diesel, premiosLiberados, correcoesBloqueadas, ultimaAtualizacao, refreshData, supabase }) {
   const [showAddModal, setShowAddModal] = useState(false);
-  const [showExtraModal, setShowExtraModal] = useState(false); // <-- Novo estado aqui
+  const [showExtraModal, setShowExtraModal] = useState(false); 
+  
+  // Filtros
   const [filtroCompetencia, setFiltroCompetencia] = useState('');
   const [filtroPeriodo, setFiltroPeriodo] = useState('');
   const [filtroDiesel, setFiltroDiesel] = useState('');
   const [filtroTipo, setFiltroTipo] = useState('');
+
+  // Novos Estados para os Extras
+  const [extrasEnviados, setExtrasEnviados] = useState([]);
+  const [abaHistorico, setAbaHistorico] = useState('viagens'); // 'viagens' ou 'extras'
+
+  // Busca os extras do motorista no banco de dados
+  useEffect(() => {
+    const carregarExtras = async () => {
+      const { data, error } = await supabase
+        .from('viagens_extra')
+        .select('*')
+        .or(`user_id.eq.${currentUser.id},motorista.eq.${currentUser.motorista}`)
+        .order('created_at', { ascending: false });
+      
+      if (!error && data) {
+        setExtrasEnviados(data);
+      }
+    };
+    
+    // Recarrega sempre que o componente monta ou quando o modal de adicionar extra é fechado
+    if (!showExtraModal) {
+      carregarExtras();
+    }
+  }, [currentUser.id, currentUser.motorista, supabase, showExtraModal]);
 
   const historicoComPeriodo = useMemo(() => {
     const confirmadas = viagens.filter(v => v.email === currentUser.email);
@@ -223,125 +249,221 @@ export default function DriverDashboard({ currentUser, viagens, setViagens, pend
 
       <div className="bg-white rounded-3xl shadow-[0_4px_20px_rgba(0,0,0,0.03)] border border-slate-100 overflow-hidden">
         <div className="px-6 py-5 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <div>
-            <h3 className="text-lg font-bold text-slate-800">Histórico de Movimentações</h3>
-            <span className="text-sm font-semibold text-slate-400">{historicoFiltrado.length} registos encontrados</span>
+          
+          <div className="flex space-x-6 border-b border-slate-200 w-full sm:w-auto">
+            <button 
+              onClick={() => setAbaHistorico('viagens')}
+              className={`pb-3 text-lg font-bold transition-colors relative ${abaHistorico === 'viagens' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
+            >
+              Viagens Regulares
+              {abaHistorico === 'viagens' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-blue-600 rounded-t-full"></div>}
+            </button>
+            <button 
+              onClick={() => setAbaHistorico('extras')}
+              className={`pb-3 text-lg font-bold transition-colors relative flex items-center gap-2 ${abaHistorico === 'extras' ? 'text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
+            >
+              Extras Via IA
+              {extrasEnviados.length > 0 && (
+                <span className={`px-2 py-0.5 rounded-full text-[10px] ${abaHistorico === 'extras' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-200 text-slate-500'}`}>
+                  {extrasEnviados.length}
+                </span>
+              )}
+              {abaHistorico === 'extras' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-indigo-600 rounded-t-full"></div>}
+            </button>
           </div>
           
-          <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
-            <div className="flex items-center space-x-2 bg-white px-3 py-2 rounded-xl shadow-sm border border-slate-200/60 w-full sm:w-auto">
-              <Filter className="w-4 h-4 text-blue-500 flex-shrink-0" />
-              <select 
-                value={filtroPeriodo} 
-                onChange={e => setFiltroPeriodo(e.target.value)} 
-                className="bg-transparent text-sm font-bold text-slate-700 outline-none cursor-pointer w-full"
-              >
-                <option value="">Período (Todos)</option>
-                {periodosDisponiveis.map(m => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
-            </div>
+          {abaHistorico === 'viagens' && (
+            <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+              <div className="flex items-center space-x-2 bg-white px-3 py-2 rounded-xl shadow-sm border border-slate-200/60 w-full sm:w-auto">
+                <Filter className="w-4 h-4 text-blue-500 flex-shrink-0" />
+                <select 
+                  value={filtroPeriodo} 
+                  onChange={e => setFiltroPeriodo(e.target.value)} 
+                  className="bg-transparent text-sm font-bold text-slate-700 outline-none cursor-pointer w-full"
+                >
+                  <option value="">Período (Todos)</option>
+                  {periodosDisponiveis.map(m => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              </div>
 
-            <div className="flex items-center space-x-2 bg-white px-3 py-2 rounded-xl shadow-sm border border-slate-200/60 w-full sm:w-auto">
-              <Filter className="w-4 h-4 text-indigo-500 flex-shrink-0" />
-              <select 
-                value={filtroTipo} 
-                onChange={e => setFiltroTipo(e.target.value)} 
-                className="bg-transparent text-sm font-bold text-slate-700 outline-none cursor-pointer w-full"
-              >
-                <option value="">Tipo (Todos)</option>
-                {tiposDisponiveis.map(t => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
+              <div className="flex items-center space-x-2 bg-white px-3 py-2 rounded-xl shadow-sm border border-slate-200/60 w-full sm:w-auto">
+                <Filter className="w-4 h-4 text-indigo-500 flex-shrink-0" />
+                <select 
+                  value={filtroTipo} 
+                  onChange={e => setFiltroTipo(e.target.value)} 
+                  className="bg-transparent text-sm font-bold text-slate-700 outline-none cursor-pointer w-full"
+                >
+                  <option value="">Tipo (Todos)</option>
+                  {tiposDisponiveis.map(t => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </div>
             </div>
-          </div>
+          )}
         </div>
         
-        {historicoFiltrado.length === 0 ? (
-          <div className="p-16 text-center flex flex-col items-center">
-            <div className="bg-blue-50 p-6 rounded-full mb-4"><Truck className="h-10 w-10 text-blue-300" /></div>
-            <p className="text-slate-500 font-medium text-lg">Nenhum registo encontrado com estes filtros.</p>
-          </div>
-        ) : (
-          <ul className="divide-y divide-slate-100">
-            {historicoFiltrado.map(item => {
-              const isEmAnalise = item.status === 'Em Análise' || item.status === 'inclusa';
-              const isReprovado = item.status === 'Reprovado';
-              const isBlockCheckbox = isEmAnalise || isReprovado;
-              const isChecked = ['confirmada', 'Aprovada', 'Aprovado'].includes(item.status);
+        {abaHistorico === 'viagens' ? (
+          /* ================= LISTA DE VIAGENS NORMAIS ================= */
+          historicoFiltrado.length === 0 ? (
+            <div className="p-16 text-center flex flex-col items-center">
+              <div className="bg-blue-50 p-6 rounded-full mb-4"><Truck className="h-10 w-10 text-blue-300" /></div>
+              <p className="text-slate-500 font-medium text-lg">Nenhum registo encontrado com estes filtros.</p>
+            </div>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {historicoFiltrado.map(item => {
+                const isEmAnalise = item.status === 'Em Análise' || item.status === 'inclusa';
+                const isReprovado = item.status === 'Reprovado';
+                const isBlockCheckbox = isEmAnalise || isReprovado;
+                const isChecked = ['confirmada', 'Aprovada', 'Aprovado'].includes(item.status);
 
-              return (
-                <li key={item.id} className="p-4 sm:p-6 hover:bg-slate-50/80 transition-colors group">
+                return (
+                  <li key={item.id} className="p-4 sm:p-6 hover:bg-slate-50/80 transition-colors group">
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+                      
+                      <div className="flex items-start space-x-4">
+                        <div className="pt-1.5 flex-shrink-0">
+                          <div className="relative flex items-center justify-center">
+                            <input 
+                              type="checkbox"
+                              checked={isChecked}
+                              disabled={isBlockCheckbox}
+                              onChange={() => handleConferirViagem(item)}
+                              className={`peer appearance-none w-6 h-6 border-2 rounded-lg transition-all duration-300 ${
+                                isBlockCheckbox 
+                                  ? 'bg-slate-100 border-slate-200 cursor-not-allowed opacity-60' 
+                                  : 'bg-white border-slate-300 checked:bg-blue-500 checked:border-blue-500 cursor-pointer hover:border-blue-400'
+                              }`}
+                            />
+                            <CheckCircle className={`absolute w-4 h-4 text-white pointer-events-none opacity-0 peer-checked:opacity-100 transition-opacity duration-300 ${isBlockCheckbox ? 'hidden' : ''}`} />
+                          </div>
+                        </div>
+                        
+                        <div>
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 mb-2">
+                            <span className="font-bold text-slate-800 text-lg tracking-tight group-hover:text-blue-600 transition-colors">
+                              {item.origem} <ChevronRight className="inline w-4 h-4 text-slate-300 mx-0.5" /> {item.destino}
+                            </span>
+                            <StatusBadge status={item.status} />
+                          </div>
+                          
+                          <div className="text-sm text-slate-500 flex flex-wrap gap-x-6 gap-y-2 font-medium">
+                            <span className="flex items-center bg-slate-50 px-2.5 py-1 rounded-md border border-slate-100" title="Período de Faturação">
+                              <Clock className="w-3.5 h-3.5 mr-1.5 text-blue-400"/> 
+                               {new Date(item.data).toLocaleDateString('pt-BR', { timeZone: 'UTC' })} <span className="text-slate-400 ml-1">({item._periodo})</span>
+                            </span>
+                            <span className="flex items-center bg-slate-50 px-2.5 py-1 rounded-md border border-slate-100"><Package className="w-3.5 h-3.5 mr-1.5 text-teal-400"/> {item.container || 'S/ Contentor'}</span>
+                            <span className="flex items-center bg-slate-50 px-2.5 py-1 rounded-md border border-slate-100"><FileText className="w-3.5 h-3.5 mr-1.5 text-indigo-400"/> {item.tipo}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {(item.resposta || (isEmAnalise && item.mensagem)) && (
+                        <div className={`p-4 rounded-2xl text-sm flex items-start space-x-3 lg:max-w-xs w-full border ${
+                          item.status === 'Reprovado' 
+                            ? 'bg-rose-50/50 text-rose-800 border-rose-100' 
+                            : isEmAnalise 
+                              ? 'bg-blue-50/50 text-blue-800 border-blue-100'
+                              : 'bg-teal-50/50 text-teal-800 border-teal-100'
+                        }`}>
+                          <div className="mt-0.5">
+                            {item.status === 'Reprovado' ? <XCircle className="w-5 h-5 text-rose-500" /> : 
+                             isEmAnalise ? <MessageSquare className="w-5 h-5 text-blue-500" /> :
+                             <CheckCircle className="w-5 h-5 text-teal-500" />}
+                          </div>
+                          <div>
+                            <span className={`block text-[10px] font-bold uppercase tracking-wider mb-1 ${
+                              item.status === 'Reprovado' ? 'text-rose-500' : isEmAnalise ? 'text-blue-500' : 'text-teal-600'
+                            }`}>
+                              {item.status === 'Reprovado' ? 'Recusado por' : isEmAnalise ? 'Sua Mensagem' : 'Nota da Fidelidade'}
+                            </span>
+                            <p className="font-medium leading-relaxed">{item.resposta || item.mensagem}</p>
+                          </div>
+                        </div>
+                      )}
+
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )
+        ) : (
+          /* ================= LISTA DE EXTRAS VIA IA ================= */
+          extrasEnviados.length === 0 ? (
+            <div className="p-16 text-center flex flex-col items-center">
+              <div className="bg-indigo-50 p-6 rounded-full mb-4"><Camera className="h-10 w-10 text-indigo-300" /></div>
+              <p className="text-slate-500 font-medium text-lg">Nenhum extra enviado pela inteligência artificial ainda.</p>
+            </div>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {extrasEnviados.map(extra => (
+                <li key={extra.id} className="p-4 sm:p-6 hover:bg-slate-50/80 transition-colors group">
                   <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
                     
                     <div className="flex items-start space-x-4">
                       <div className="pt-1.5 flex-shrink-0">
-                        <div className="relative flex items-center justify-center">
-                          <input 
-                            type="checkbox"
-                            checked={isChecked}
-                            disabled={isBlockCheckbox}
-                            onChange={() => handleConferirViagem(item)}
-                            className={`peer appearance-none w-6 h-6 border-2 rounded-lg transition-all duration-300 ${
-                              isBlockCheckbox 
-                                ? 'bg-slate-100 border-slate-200 cursor-not-allowed opacity-60' 
-                                : 'bg-white border-slate-300 checked:bg-blue-500 checked:border-blue-500 cursor-pointer hover:border-blue-400'
-                            }`}
-                          />
-                          <CheckCircle className={`absolute w-4 h-4 text-white pointer-events-none opacity-0 peer-checked:opacity-100 transition-opacity duration-300 ${isBlockCheckbox ? 'hidden' : ''}`} />
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${extra.status === 'Validado' ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'}`}>
+                          <Camera className="w-5 h-5" />
                         </div>
                       </div>
                       
                       <div>
                         <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 mb-2">
-                          <span className="font-bold text-slate-800 text-lg tracking-tight group-hover:text-blue-600 transition-colors">
-                            {item.origem} <ChevronRight className="inline w-4 h-4 text-slate-300 mx-0.5" /> {item.destino}
+                          <span className="font-bold text-slate-800 text-lg tracking-tight group-hover:text-indigo-600 transition-colors">
+                            {extra.origem} <ChevronRight className="inline w-4 h-4 text-slate-300 mx-0.5" /> {extra.destino}
                           </span>
-                          <StatusBadge status={item.status} />
+                          <span className={`px-2.5 py-1 rounded-md text-[11px] font-black uppercase tracking-wider w-fit border ${
+                            extra.status === 'Validado' 
+                              ? 'bg-emerald-100 text-emerald-700 border-emerald-200' 
+                              : 'bg-amber-100 text-amber-700 border-amber-200'
+                          }`}>
+                            {extra.status}
+                          </span>
                         </div>
                         
                         <div className="text-sm text-slate-500 flex flex-wrap gap-x-6 gap-y-2 font-medium">
-                          <span className="flex items-center bg-slate-50 px-2.5 py-1 rounded-md border border-slate-100" title="Período de Faturação">
+                          <span className="flex items-center bg-slate-50 px-2.5 py-1 rounded-md border border-slate-100">
                             <Clock className="w-3.5 h-3.5 mr-1.5 text-blue-400"/> 
-                             {new Date(item.data).toLocaleDateString('pt-BR', { timeZone: 'UTC' })} <span className="text-slate-400 ml-1">({item._periodo})</span>
+                            {extra.data ? extra.data.split('-').reverse().join('/') : '--/--/----'} {extra.hora && `às ${extra.hora}`}
                           </span>
-                          <span className="flex items-center bg-slate-50 px-2.5 py-1 rounded-md border border-slate-100"><Package className="w-3.5 h-3.5 mr-1.5 text-teal-400"/> {item.container || 'S/ Contentor'}</span>
-                          <span className="flex items-center bg-slate-50 px-2.5 py-1 rounded-md border border-slate-100"><FileText className="w-3.5 h-3.5 mr-1.5 text-indigo-400"/> {item.tipo}</span>
+                          <span className="flex items-center bg-slate-50 px-2.5 py-1 rounded-md border border-slate-100">
+                            <Package className="w-3.5 h-3.5 mr-1.5 text-teal-400"/> {extra.container || 'S/ Contentor'}
+                          </span>
+                          <span className="flex items-center bg-slate-50 px-2.5 py-1 rounded-md border border-slate-100">
+                            <FileText className="w-3.5 h-3.5 mr-1.5 text-indigo-400"/> {extra.tipo_operacao}
+                          </span>
+                          {extra.photo_source === 'galeria' && (
+                            <span className="flex items-center bg-purple-50 text-purple-700 px-2.5 py-1 rounded-md border border-purple-100">
+                              <ImageIcon className="w-3.5 h-3.5 mr-1.5 text-purple-500"/> Galeria
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
 
-                    {(item.resposta || (isEmAnalise && item.mensagem)) && (
-                      <div className={`p-4 rounded-2xl text-sm flex items-start space-x-3 lg:max-w-xs w-full border ${
-                        item.status === 'Reprovado' 
-                          ? 'bg-rose-50/50 text-rose-800 border-rose-100' 
-                          : isEmAnalise 
-                            ? 'bg-blue-50/50 text-blue-800 border-blue-100'
-                            : 'bg-teal-50/50 text-teal-800 border-teal-100'
-                      }`}>
-                        <div className="mt-0.5">
-                          {item.status === 'Reprovado' ? <XCircle className="w-5 h-5 text-rose-500" /> : 
-                           isEmAnalise ? <MessageSquare className="w-5 h-5 text-blue-500" /> :
-                           <CheckCircle className="w-5 h-5 text-teal-500" />}
-                        </div>
-                        <div>
-                          <span className={`block text-[10px] font-bold uppercase tracking-wider mb-1 ${
-                            item.status === 'Reprovado' ? 'text-rose-500' : isEmAnalise ? 'text-blue-500' : 'text-teal-600'
-                          }`}>
-                            {item.status === 'Reprovado' ? 'Recusado por' : isEmAnalise ? 'Sua Mensagem' : 'Nota da Fidelidade'}
-                          </span>
-                          <p className="font-medium leading-relaxed">{item.resposta || item.mensagem}</p>
-                        </div>
+                    {extra.comprovante_url && (
+                      <div className="mt-4 lg:mt-0 lg:ml-auto">
+                        <a 
+                          href={extra.comprovante_url} 
+                          target="_blank" 
+                          rel="noreferrer" 
+                          className="inline-flex items-center justify-center space-x-2 text-sm font-bold text-slate-600 bg-white hover:bg-indigo-50 border border-slate-200 hover:border-indigo-200 hover:text-indigo-700 px-5 py-3 rounded-xl transition-all shadow-sm w-full sm:w-auto"
+                        >
+                          <ImageIcon className="w-4 h-4 text-indigo-500" />
+                          <span>Ver Foto</span>
+                        </a>
                       </div>
                     )}
-
+                    
                   </div>
                 </li>
-              );
-            })}
-          </ul>
+              ))}
+            </ul>
+          )
         )}
       </div>
 
