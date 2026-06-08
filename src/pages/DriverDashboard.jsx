@@ -255,7 +255,7 @@ export default function DriverDashboard({ currentUser, viagens, setViagens, pend
               onClick={() => setAbaHistorico('viagens')}
               className={`pb-3 text-lg font-bold transition-colors relative ${abaHistorico === 'viagens' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
             >
-              Viagens Regulares
+              Base Geral
               {abaHistorico === 'viagens' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-blue-600 rounded-t-full"></div>}
             </button>
             <button 
