@@ -180,7 +180,11 @@ export default function ExtraTripScreen({ currentUser, onClose, supabase }) {
   const setMetadados = (selectedFile = null) => {
     if (dataFoto) return; 
     const dateToUse = selectedFile && selectedFile.lastModified ? new Date(selectedFile.lastModified) : new Date();
-    setDataFoto(dateToUse.toISOString().split('T')[0]);
+    const ano = dateToUse.getFullYear();
+    const mes = String(dateToUse.getMonth() + 1).padStart(2, '0');
+    const dia = String(dateToUse.getDate()).padStart(2, '0');
+
+    setDataFoto(`${ano}-${mes}-${dia}`);
     setHoraFoto(dateToUse.toTimeString().split(' ')[0].substring(0, 5));
   };
 
