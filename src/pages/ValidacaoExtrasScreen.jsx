@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Loader2, Search, CheckCircle, AlertCircle, Image as ImageIcon, XCircle, Save, Filter, ArrowRight, BarChart3, ListTodo, Download, FileSpreadsheet, PieChart } from 'lucide-react';
-
+import { Loader2, Search, CheckCircle, AlertCircle, Image as ImageIcon, XCircle, Save, Filter, ArrowRight, BarChart3, ListTodo, Download, FileSpreadsheet, PieChart, Trash2 } from 'lucide-react';
 export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
   const [activeTab, setActiveTab] = useState('validacao');
   const [viagens, setViagens] = useState([]);
@@ -139,6 +138,38 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
       setIsSaving(false);
     }
   };
+
+  const excluirViagem = async () => {
+  if (!viagemSelecionada) return;
+
+  const confirmar = window.confirm(
+    'Tem certeza que deseja excluir esta viagem extra? Essa ação não poderá ser desfeita.'
+  );
+
+  if (!confirmar) return;
+
+  setIsSaving(true);
+
+  try {
+    const { error } = await supabase
+      .from('viagens_extra')
+      .delete()
+      .eq('id', viagemSelecionada.id);
+
+    if (error) throw error;
+
+    setViagens((viagensAtuais) =>
+      viagensAtuais.filter((viagem) => viagem.id !== viagemSelecionada.id)
+    );
+
+    fecharModal();
+  } catch (error) {
+    console.error('Erro ao excluir viagem:', error);
+    alert('Erro ao excluir viagem: ' + error.message);
+  } finally {
+    setIsSaving(false);
+  }
+};
 
   const handleExportarExtras = async () => {
     if (!dataInicioExport || !dataFimExport) {
@@ -546,114 +577,223 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
       )}
 
       {/* ================= MODAL DE VALIDAÇÃO ================= */}
-      {viagemSelecionada && (
-        <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-5xl flex flex-col overflow-hidden max-h-[90vh]">
-            
-            <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 flex justify-between items-center">
-              <h3 className="text-lg font-black text-slate-800">Validação de Documentos</h3>
-              <button onClick={fecharModal} className="text-slate-400 hover:text-slate-600"><XCircle className="w-6 h-6" /></button>
+{viagemSelecionada && (
+  <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-5xl flex flex-col overflow-hidden max-h-[90vh]">
+      
+      <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 flex justify-between items-center">
+        <h3 className="text-lg font-black text-slate-800">
+          Validação de Documentos
+        </h3>
+
+        <button
+          type="button"
+          onClick={fecharModal}
+          disabled={isSaving}
+          className="text-slate-400 hover:text-slate-600 disabled:opacity-50"
+        >
+          <XCircle className="w-6 h-6" />
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-6">
+        <form
+          id="form-validacao"
+          onSubmit={aprovarViagem}
+          className="grid grid-cols-1 lg:grid-cols-2 gap-8"
+        >
+          
+          {/* FOTO */}
+          <div className="space-y-4 flex flex-col h-full">
+            <div className="flex-1 flex flex-col">
+              <h4 className="text-xs font-bold text-slate-400 uppercase mb-2 flex items-center">
+                <ImageIcon className="w-4 h-4 mr-2" />
+                Foto Capturada (Contêiner + Placa)
+              </h4>
+
+              <div className="bg-slate-900 rounded-3xl flex-1 min-h-[400px] border border-slate-200 overflow-hidden flex items-center justify-center relative group p-2">
+                {viagemSelecionada.comprovante_url ? (
+                  <a
+                    href={viagemSelecionada.comprovante_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="w-full h-full flex items-center justify-center"
+                  >
+                    <img
+                      src={viagemSelecionada.comprovante_url}
+                      alt="Comprovante"
+                      className="max-w-full max-h-[60vh] object-contain rounded-2xl"
+                    />
+
+                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white font-bold text-sm rounded-3xl">
+                      Clique para ampliar
+                    </div>
+                  </a>
+                ) : (
+                  <span className="text-slate-500 font-medium text-sm">
+                    Nenhuma imagem enviada.
+                  </span>
+                )}
+              </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6">
-              <form id="form-validacao" onSubmit={aprovarViagem} className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                
-                <div className="space-y-4 flex flex-col h-full">
-                  <div className="flex-1 flex flex-col">
-                    <h4 className="text-xs font-bold text-slate-400 uppercase mb-2 flex items-center"><ImageIcon className="w-4 h-4 mr-2" /> Foto Capturada (Contêiner + Placa)</h4>
-                    <div className="bg-slate-900 rounded-3xl flex-1 min-h-[400px] border border-slate-200 overflow-hidden flex items-center justify-center relative group p-2">
-                      {viagemSelecionada.comprovante_url ? (
-                        <a href={viagemSelecionada.comprovante_url} target="_blank" rel="noreferrer" className="w-full h-full flex items-center justify-center">
-                          <img src={viagemSelecionada.comprovante_url} alt="Comprovante" className="max-w-full max-h-[60vh] object-contain rounded-2xl" />
-                          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white font-bold text-sm rounded-3xl">Clique para ampliar</div>
-                        </a>
-                      ) : (
-                        <span className="text-slate-500 font-medium text-sm">Nenhuma imagem enviada.</span>
-                      )}
-                    </div>
-                  </div>
+            {viagemSelecionada.mensagem?.includes('Justificativa:') && (
+              <div className="bg-amber-50 p-4 rounded-xl border border-amber-200 shrink-0 mt-4">
+                <h4 className="text-xs font-bold text-amber-800 uppercase mb-1">
+                  Aviso da Galeria
+                </h4>
 
-                  {viagemSelecionada.mensagem?.includes('Justificativa:') && (
-                    <div className="bg-amber-50 p-4 rounded-xl border border-amber-200 shrink-0 mt-4">
-                      <h4 className="text-xs font-bold text-amber-800 uppercase mb-1">Aviso da Galeria</h4>
-                      <p className="text-sm text-amber-900">{viagemSelecionada.mensagem}</p>
-                    </div>
-                  )}
-                </div>
+                <p className="text-sm text-amber-900">
+                  {viagemSelecionada.mensagem}
+                </p>
+              </div>
+            )}
+          </div>
 
-                <div className="bg-slate-50 p-6 rounded-3xl border border-slate-200 h-fit space-y-5">
-                  <div className="bg-blue-50 text-blue-800 p-4 rounded-xl text-sm font-medium border border-blue-100 mb-6">
-                    Revise os dados lidos pela IA. Se algum campo estiver vazio ou incorreto, edite-o olhando para as fotos ao lado antes de aprovar.
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">Nº do Contêiner</label>
-                    <input 
-                      type="text" 
-                      value={editContainer} 
-                      onChange={e => setEditContainer(e.target.value.toUpperCase())}
-                      className={`w-full bg-white rounded-xl p-3 text-lg font-black tracking-wider outline-none border-2 focus:border-blue-500 ${!editContainer ? 'border-amber-400 bg-amber-50' : 'border-slate-200'}`}
-                      placeholder="XXXX0000000"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="col-span-2 sm:col-span-1">
-                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">Placa</label>
-                      <input 
-                        type="text" 
-                        value={editPlaca} 
-                        onChange={e => setEditPlaca(e.target.value.toUpperCase())}
-                        className={`w-full bg-white rounded-xl p-3 text-sm font-bold uppercase outline-none border-2 focus:border-blue-500 ${!editPlaca ? 'border-amber-400 bg-amber-50' : 'border-slate-200'}`}
-                        placeholder="ABC1D23"
-                      />
-                    </div>
-                    
-                    <div className="col-span-2 sm:col-span-1">
-                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">Frota</label>
-                      <input 
-                        type="text" 
-                        value={editFrota} 
-                        onChange={e => setEditFrota(e.target.value.toUpperCase())}
-                        className="w-full bg-white border-slate-200 border-2 rounded-xl p-3 text-sm font-bold uppercase outline-none focus:border-blue-500"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">Carreta</label>
-                    <input 
-                      type="text" 
-                      value={editCarreta} 
-                      onChange={e => setEditCarreta(e.target.value.toUpperCase())}
-                      className="w-full bg-white border-slate-200 border-2 rounded-xl p-3 text-sm font-bold uppercase outline-none focus:border-blue-500"
-                    />
-                  </div>
-                  
-                  <div className="pt-4 border-t border-slate-200 grid grid-cols-2 gap-2 text-sm text-slate-500">
-                     <div><strong className="block text-xs uppercase">Operação:</strong> {viagemSelecionada.tipo_operacao}</div>
-                     <div><strong className="block text-xs uppercase">Trajeto:</strong> {viagemSelecionada.origem} ➔ {viagemSelecionada.destino}</div>
-                  </div>
-                </div>
-              </form>
+          {/* DADOS DA VIAGEM */}
+          <div className="bg-slate-50 p-6 rounded-3xl border border-slate-200 h-fit space-y-5">
+            <div className="bg-blue-50 text-blue-800 p-4 rounded-xl text-sm font-medium border border-blue-100 mb-6">
+              Revise os dados lidos pela IA. Se algum campo estiver vazio ou
+              incorreto, edite-o olhando para a foto antes de aprovar.
             </div>
 
-            <div className="bg-white border-t border-slate-200 px-6 py-4 flex justify-end space-x-3">
-              <button type="button" onClick={fecharModal} className="px-6 py-3 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl font-bold transition-colors">
-                Cancelar
-              </button>
-              <button 
-                type="submit" 
-                form="form-validacao" 
-                disabled={isSaving || !editContainer || !editPlaca}
-                className="bg-emerald-500 hover:bg-emerald-600 text-white px-8 py-3 rounded-xl font-bold flex items-center transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <> <Save className="w-5 h-5 mr-2"/> Aprovar Viagem </>}
-              </button>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">
+                Nº do Contêiner
+              </label>
+
+              <input
+                type="text"
+                value={editContainer}
+                onChange={(e) =>
+                  setEditContainer(e.target.value.toUpperCase())
+                }
+                className={`w-full bg-white rounded-xl p-3 text-lg font-black tracking-wider outline-none border-2 focus:border-blue-500 ${
+                  !editContainer
+                    ? 'border-amber-400 bg-amber-50'
+                    : 'border-slate-200'
+                }`}
+                placeholder="XXXX0000000"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-2 sm:col-span-1">
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">
+                  Placa
+                </label>
+
+                <input
+                  type="text"
+                  value={editPlaca}
+                  onChange={(e) =>
+                    setEditPlaca(e.target.value.toUpperCase())
+                  }
+                  className={`w-full bg-white rounded-xl p-3 text-sm font-bold uppercase outline-none border-2 focus:border-blue-500 ${
+                    !editPlaca
+                      ? 'border-amber-400 bg-amber-50'
+                      : 'border-slate-200'
+                  }`}
+                  placeholder="ABC1D23"
+                />
+              </div>
+
+              <div className="col-span-2 sm:col-span-1">
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">
+                  Frota
+                </label>
+
+                <input
+                  type="text"
+                  value={editFrota}
+                  onChange={(e) =>
+                    setEditFrota(e.target.value.toUpperCase())
+                  }
+                  className="w-full bg-white border-slate-200 border-2 rounded-xl p-3 text-sm font-bold uppercase outline-none focus:border-blue-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">
+                Carreta
+              </label>
+
+              <input
+                type="text"
+                value={editCarreta}
+                onChange={(e) =>
+                  setEditCarreta(e.target.value.toUpperCase())
+                }
+                className="w-full bg-white border-slate-200 border-2 rounded-xl p-3 text-sm font-bold uppercase outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div className="pt-4 border-t border-slate-200 grid grid-cols-2 gap-2 text-sm text-slate-500">
+              <div>
+                <strong className="block text-xs uppercase">
+                  Operação:
+                </strong>
+                {viagemSelecionada.tipo_operacao}
+              </div>
+
+              <div>
+                <strong className="block text-xs uppercase">
+                  Trajeto:
+                </strong>
+                {viagemSelecionada.origem} ➔ {viagemSelecionada.destino}
+              </div>
             </div>
           </div>
+        </form>
+      </div>
+
+      {/* BOTÕES */}
+      <div className="bg-white border-t border-slate-200 px-6 py-4 flex flex-col sm:flex-row justify-between gap-3">
+        
+        <button
+          type="button"
+          onClick={excluirViagem}
+          disabled={isSaving}
+          className="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 px-6 py-3 rounded-xl font-bold flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <Trash2 className="w-5 h-5 mr-2" />
+          Excluir Viagem
+        </button>
+
+        <div className="flex flex-col sm:flex-row gap-3">
+          <button
+            type="button"
+            onClick={fecharModal}
+            disabled={isSaving}
+            className="px-6 py-3 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl font-bold transition-colors disabled:opacity-50"
+          >
+            Cancelar
+          </button>
+
+          <button
+            type="submit"
+            form="form-validacao"
+            disabled={isSaving || !editContainer || !editPlaca}
+            className="bg-emerald-500 hover:bg-emerald-600 text-white px-8 py-3 rounded-xl font-bold flex items-center justify-center transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isSaving ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                Processando...
+              </>
+            ) : (
+              <>
+                <Save className="w-5 h-5 mr-2" />
+                Aprovar Viagem
+              </>
+            )}
+          </button>
         </div>
-      )}
+      </div>
+    </div>
+  </div>
+)}
     </div>
   );
 }
