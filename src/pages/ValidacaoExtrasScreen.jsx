@@ -54,10 +54,11 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
 
       const { data, error } = await query;
       if (error) throw error;
+
       setViagens(data || []);
     } catch (error) {
       console.error('Erro ao buscar viagens:', error);
-      alert('Erro ao carregar a fila de validação.');
+      alert('Erro ao carregar a fila de validação: ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -101,6 +102,7 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
       setDashMetrics({ total, acertos, erros, taxa });
     } catch (error) {
       console.error('Erro ao carregar dashboard:', error);
+      alert('Erro ao carregar dashboard: ' + error.message);
     } finally {
       setLoadingDash(false);
     }
@@ -120,7 +122,7 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
 
         let query = supabase
           .from('viagens_extra')
-          .select('id, tipo_operacao, origem, destino, container, placa, frota, carreta, motorista, user_id, data, hora, status, ocr_correto, comprovante_url, photo_source, justificativa, mensagem, created_at')
+          .select('id, tipo_operacao, origem, destino, container, placa, frota, carreta, motorista, data, hora, status, ocr_correto, comprovante_url, created_at')
           .eq('status', 'Validado')
           .order('data', { ascending: false })
           .order('created_at', { ascending: false })
@@ -140,7 +142,7 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
       setHistorico(registros);
     } catch (error) {
       console.error('Erro ao carregar histórico:', error);
-      alert('Erro ao carregar o histórico da base de dados.');
+      alert('Erro ao carregar o histórico da base de dados: ' + error.message);
     } finally {
       setLoadingHistorico(false);
     }
@@ -332,6 +334,7 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
             </h1>
             <p className="text-slate-400 text-sm mt-1">Acesso Restrito às Validações</p>
           </div>
+
           <button onClick={onLogout} className="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-lg font-bold text-sm transition-colors border border-slate-700">
             Sair do Sistema
           </button>
@@ -344,12 +347,14 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
           >
             <ListTodo className="w-4 h-4 mr-2" /> Fila de Validação
           </button>
+
           <button
             onClick={() => setActiveTab('dashboard')}
             className={`px-6 py-3 font-bold text-sm rounded-t-xl transition-colors flex items-center whitespace-nowrap ${activeTab === 'dashboard' ? 'bg-slate-100 text-slate-900' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
           >
             <BarChart3 className="w-4 h-4 mr-2" /> Dashboard IA
           </button>
+
           <button
             onClick={() => setActiveTab('historico')}
             className={`px-6 py-3 font-bold text-sm rounded-t-xl transition-colors flex items-center whitespace-nowrap ${activeTab === 'historico' ? 'bg-slate-100 text-slate-900' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
@@ -432,6 +437,7 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
                     <th className="p-4 text-right">Ação</th>
                   </tr>
                 </thead>
+
                 <tbody className="divide-y divide-slate-100">
                   {loading ? (
                     <tr>
@@ -454,15 +460,19 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
                           <td className="p-4 font-medium text-slate-700">
                             {viagem?.data ? viagem.data.split('-').reverse().join('/') : '--/--/----'} às {viagem?.hora || '--:--'}
                           </td>
+
                           <td className="p-4 font-bold text-slate-900">
-                            {viagem?.motorista || 'ID: ' + (viagem?.user_id ? viagem.user_id.substring(0, 6) : 'Desconhecido')}
+                            {viagem?.motorista || 'Desconhecido'}
                           </td>
+
                           <td className="p-4 font-medium text-blue-600 bg-blue-50/50">
                             {viagem.tipo_operacao}
                           </td>
+
                           <td className="p-4 text-slate-600">
                             {viagem.origem} <ArrowRight className="inline w-3 h-3 text-slate-400 mx-1" /> {viagem.destino}
                           </td>
+
                           <td className="p-4">
                             <div className="flex flex-col gap-2 items-center justify-center">
                               {falhaOCR ? (
@@ -487,6 +497,7 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
                               )}
                             </div>
                           </td>
+
                           <td className="p-4 text-right">
                             <button
                               onClick={() => abrirModal(viagem)}
@@ -559,6 +570,7 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
                         className="transition-all duration-1000 ease-out"
                       />
                     </svg>
+
                     <div className="absolute inset-0 flex flex-col items-center justify-center">
                       <span className="text-3xl font-black text-slate-800">{dashMetrics.taxa}%</span>
                       <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Acertos</span>
@@ -594,11 +606,9 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
 
         {activeTab === 'historico' && (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-black text-slate-800">Histórico da Base de Dados</h2>
-                <p className="text-sm text-slate-500 font-medium">{historicoFiltrado.length} registros validados encontrados</p>
-              </div>
+            <div className="px-5 py-4 border-b border-slate-200">
+              <h2 className="text-lg font-black text-slate-800">Histórico da Base de Dados</h2>
+              <p className="text-sm text-slate-500 font-medium">{historicoFiltrado.length} registros validados encontrados</p>
             </div>
 
             <div className="overflow-x-auto">
@@ -615,6 +625,7 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
                     <th className="p-4 text-right">Foto</th>
                   </tr>
                 </thead>
+
                 <tbody className="divide-y divide-slate-100">
                   {loadingHistorico ? (
                     <tr>
@@ -634,17 +645,22 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
                         <td className="p-4 font-medium text-slate-700">
                           {viagem?.data ? viagem.data.split('-').reverse().join('/') : '--/--/----'} às {viagem?.hora || '--:--'}
                         </td>
+
                         <td className="p-4 font-bold text-slate-900">
-                          {viagem?.motorista || 'ID: ' + (viagem?.user_id ? viagem.user_id.substring(0, 6) : 'Desconhecido')}
+                          {viagem?.motorista || 'Desconhecido'}
                         </td>
+
                         <td className="p-4 font-medium text-blue-600 bg-blue-50/50">
                           {viagem.tipo_operacao || '-'}
                         </td>
+
                         <td className="p-4 text-slate-600">
                           {viagem.origem || '-'} <ArrowRight className="inline w-3 h-3 text-slate-400 mx-1" /> {viagem.destino || '-'}
                         </td>
+
                         <td className="p-4 font-black tracking-wider text-slate-800">{viagem.container || '-'}</td>
                         <td className="p-4 font-bold text-slate-700">{viagem.placa || '-'}</td>
+
                         <td className="p-4 text-center">
                           {viagem.ocr_correto === true ? (
                             <span className="inline-flex items-center px-2 py-1 bg-emerald-100 text-emerald-700 rounded-md text-xs font-bold">
@@ -660,6 +676,7 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
                             </span>
                           )}
                         </td>
+
                         <td className="p-4 text-right">
                           {viagem.comprovante_url ? (
                             <button
@@ -689,9 +706,11 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
               <AlertCircle className="w-6 h-6 mr-2" />
               <h3 className="text-lg font-black text-slate-800">Aviso da Galeria</h3>
             </div>
+
             <p className="text-slate-600 font-medium leading-relaxed bg-slate-50 p-4 rounded-xl border border-slate-100">
               {justificativaModal}
             </p>
+
             <button onClick={() => setJustificativaModal(null)} className="mt-2 w-full bg-slate-900 hover:bg-slate-800 text-white py-3 rounded-xl font-bold transition-colors shadow-md">
               Fechar
             </button>
@@ -709,6 +728,7 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
                   {fotoHistoricoModal.motorista || 'Motorista não informado'} • {fotoHistoricoModal.container || 'Sem container'} • {fotoHistoricoModal.placa || 'Sem placa'}
                 </p>
               </div>
+
               <button onClick={() => setFotoHistoricoModal(null)} className="text-slate-400 hover:text-slate-600">
                 <XCircle className="w-6 h-6" />
               </button>
@@ -735,6 +755,7 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
                 <FileSpreadsheet className="w-6 h-6 mr-2 text-indigo-600" />
                 Exportar Extras
               </h3>
+
               <button onClick={() => setIsExportExtraOpen(false)} className="text-slate-400 hover:text-rose-500 transition-colors">
                 <XCircle className="w-6 h-6" />
               </button>
@@ -745,6 +766,7 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
                 <label className="block text-sm font-bold text-slate-700 mb-2">Período Inicial</label>
                 <input type="date" value={dataInicioExport} onChange={e => setDataInicioExport(e.target.value)} className="w-full border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500/20 border bg-slate-50" />
               </div>
+
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-2">Período Final</label>
                 <input type="date" value={dataFimExport} onChange={e => setDataFimExport(e.target.value)} className="w-full border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500/20 border bg-slate-50" />
@@ -755,6 +777,7 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
               <button onClick={() => setIsExportExtraOpen(false)} className="flex-1 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 py-3 rounded-xl font-bold transition-colors">
                 Cancelar
               </button>
+
               <button onClick={handleExportarExtras} disabled={isExportingExtra} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl font-bold transition-all shadow-md flex items-center justify-center">
                 {isExportingExtra ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <Download className="w-5 h-5 mr-2" />}
                 {isExportingExtra ? 'A Extrair...' : 'Extrair Relatório'}
@@ -768,9 +791,7 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
         <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-5xl flex flex-col overflow-hidden max-h-[90vh]">
             <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 flex justify-between items-center">
-              <h3 className="text-lg font-black text-slate-800">
-                Validação de Documentos
-              </h3>
+              <h3 className="text-lg font-black text-slate-800">Validação de Documentos</h3>
 
               <button type="button" onClick={fecharModal} disabled={isSaving} className="text-slate-400 hover:text-slate-600 disabled:opacity-50">
                 <XCircle className="w-6 h-6" />
@@ -795,21 +816,15 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
                           </div>
                         </a>
                       ) : (
-                        <span className="text-slate-500 font-medium text-sm">
-                          Nenhuma imagem enviada.
-                        </span>
+                        <span className="text-slate-500 font-medium text-sm">Nenhuma imagem enviada.</span>
                       )}
                     </div>
                   </div>
 
                   {viagemSelecionada.mensagem?.includes('Justificativa:') && (
                     <div className="bg-amber-50 p-4 rounded-xl border border-amber-200 shrink-0 mt-4">
-                      <h4 className="text-xs font-bold text-amber-800 uppercase mb-1">
-                        Aviso da Galeria
-                      </h4>
-                      <p className="text-sm text-amber-900">
-                        {viagemSelecionada.mensagem}
-                      </p>
+                      <h4 className="text-xs font-bold text-amber-800 uppercase mb-1">Aviso da Galeria</h4>
+                      <p className="text-sm text-amber-900">{viagemSelecionada.mensagem}</p>
                     </div>
                   )}
                 </div>
@@ -820,9 +835,7 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">
-                      Nº do Contêiner
-                    </label>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">Nº do Contêiner</label>
                     <input
                       type="text"
                       value={editContainer}
@@ -834,9 +847,7 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="col-span-2 sm:col-span-1">
-                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">
-                        Placa
-                      </label>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">Placa</label>
                       <input
                         type="text"
                         value={editPlaca}
@@ -847,9 +858,7 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
                     </div>
 
                     <div className="col-span-2 sm:col-span-1">
-                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">
-                        Frota
-                      </label>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">Frota</label>
                       <input
                         type="text"
                         value={editFrota}
@@ -860,9 +869,7 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">
-                      Carreta
-                    </label>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">Carreta</label>
                     <input
                       type="text"
                       value={editCarreta}
