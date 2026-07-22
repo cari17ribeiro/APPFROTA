@@ -532,7 +532,7 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
                     <th className="p-4">Container</th>
                     <th className="p-4">Placa</th>
                     <th className="p-4 text-center">OCR</th>
-                    <th className="p-4 text-right">Foto</th>
+                    <th className="p-4 text-right sticky right-0 bg-slate-50 shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)] z-10">Foto</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -564,7 +564,7 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
                             <span className="inline-flex items-center px-2 py-1 bg-slate-100 text-slate-500 rounded-md text-xs font-bold">Não avaliado</span>
                           )}
                         </td>
-                        <td className="p-4 text-right">
+                        <td className="p-4 text-right sticky right-0 bg-white shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]">
                           {viagem.comprovante_url ? (
                             <button onClick={() => setFotoHistoricoModal(viagem)} className="inline-flex items-center justify-center bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg font-bold transition-colors shadow-sm">
                               <ImageIcon className="w-4 h-4 mr-2" /> Ver foto
