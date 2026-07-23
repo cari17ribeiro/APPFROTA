@@ -221,29 +221,27 @@ export default function DriverDashboard({ currentUser, viagens, setViagens, pend
 
       {/* Ações */}
       <div className="flex flex-col sm:flex-row justify-end gap-3">
+         <button
+           onClick={() => setShowExtraModal(true)}
+           className="w-full sm:w-auto flex items-center justify-center space-x-2 bg-slate-800 hover:bg-slate-900 text-white px-7 py-3.5 rounded-2xl transition-all duration-300 shadow-md hover:shadow-lg font-bold"
+         >
+           <Camera className="h-5 w-5 text-slate-300" />
+           <span>Registar Extra (OCR)</span>
+         </button>
+
          {correcoesBloqueadas ? (
             <div className="w-full sm:max-w-lg bg-blue-50/80 border border-blue-200/60 text-blue-800 p-5 rounded-2xl shadow-sm text-sm backdrop-blur-sm">
                <p className="font-bold flex items-center mb-1.5 text-blue-900 text-base"><AlertCircle className="w-5 h-5 mr-2 text-blue-600"/> Prazo Encerrado</p>
                <p className="font-medium text-blue-700/90 leading-relaxed">O envio de correções está suspenso. Novas correções entrarão no ciclo da próxima premiação.</p>
             </div>
          ) : (
-            <>
-              <button 
-                onClick={() => setShowExtraModal(true)}
-                className="w-full sm:w-auto flex items-center justify-center space-x-2 bg-slate-800 hover:bg-slate-900 text-white px-7 py-3.5 rounded-2xl transition-all duration-300 shadow-md hover:shadow-lg font-bold"
-              >
-                <Camera className="h-5 w-5 text-slate-300" />
-                <span>Registar Extra (OCR)</span>
-              </button>
-
-              <button 
-                onClick={() => setShowAddModal(true)}
-                className="w-full sm:w-auto flex items-center justify-center space-x-2 bg-gradient-to-r from-blue-600 to-teal-500 hover:from-blue-700 hover:to-teal-600 text-white px-7 py-3.5 rounded-2xl transition-all duration-300 shadow-md hover:shadow-lg font-bold"
-              >
-                <Plus className="h-5 w-5 text-teal-200" />
-                <span>Faltou uma viagem?</span>
-              </button>
-            </>
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="w-full sm:w-auto flex items-center justify-center space-x-2 bg-gradient-to-r from-blue-600 to-teal-500 hover:from-blue-700 hover:to-teal-600 text-white px-7 py-3.5 rounded-2xl transition-all duration-300 shadow-md hover:shadow-lg font-bold"
+            >
+              <Plus className="h-5 w-5 text-teal-200" />
+              <span>Faltou uma viagem?</span>
+            </button>
          )}
       </div>
 
