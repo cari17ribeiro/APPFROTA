@@ -433,6 +433,12 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
                                   <ImageIcon className="w-3 h-3 mr-1" /> Galeria
                                 </button>
                               )}
+                              {viagem.aviso_programacao && (
+                                <span className="inline-flex items-center px-2 py-1 bg-rose-100 text-rose-700 rounded-md text-xs font-bold border border-rose-200">
+                                  <AlertCircle className="w-3 h-3 mr-1" />
+                                  {viagem.aviso_programacao}
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td className="p-4 text-right">
@@ -679,6 +685,12 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
                 </div>
                 <div className="bg-slate-50 p-6 rounded-3xl border border-slate-200 h-fit space-y-5">
                   <div className="bg-blue-50 text-blue-800 p-4 rounded-xl text-sm font-medium border border-blue-100 mb-6">Revise os dados lidos pela IA. Se algum campo estiver vazio ou incorreto, edite-o olhando para a foto antes de aprovar.</div>
+                  {viagemSelecionada.aviso_programacao && (
+                    <div className="bg-rose-50 text-rose-700 p-4 rounded-xl text-sm font-bold border border-rose-200 flex items-start">
+                      <AlertCircle className="w-5 h-5 mr-2 mt-0.5 shrink-0" />
+                      <span>{viagemSelecionada.aviso_programacao}</span>
+                    </div>
+                  )}
                   <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">Nº do Contêiner</label>
                     <input type="text" value={editContainer} onChange={(e) => setEditContainer(e.target.value.toUpperCase())} className={`w-full bg-white rounded-xl p-3 text-lg font-black tracking-wider outline-none border-2 focus:border-blue-500 ${!editContainer ? 'border-amber-400 bg-amber-50' : 'border-slate-200'}`} placeholder="XXXX0000000" />
