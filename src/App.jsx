@@ -5,6 +5,7 @@ import DriverDashboard from './pages/DriverDashboard.jsx';
 import AdminDashboard from './pages/AdminDashboard.jsx';
 import ValidacaoExtrasScreen from './pages/ValidacaoExtrasScreen.jsx'; 
 import { supabase } from './lib/supabase.js';
+import ProgramacaoViagensScreen from './pages/ProgramacaoViagensScreen.jsx';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState(() => {
@@ -44,14 +45,18 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
   
-  const fetchData = async () => {
-    if (!currentUser) return;
+  onst fetchData = async () => {
+  if (!currentUser) return;
 
-    if (currentUser.role === 'validador' || currentUser.email === 'validacao@premio.com') {
-      return; 
-    }
+  if (
+    currentUser.role === 'validador' ||
+    currentUser.email === 'validacao@premio.com' ||
+    currentUser.email === 'programacao@premio.com'
+  ) {
+    return;
+  }
 
-    setIsLoadingData(true);
+  setIsLoadingData(true);
 
     try {
       const { data: configData } = await supabase.from('configuracoes').select('*').eq('id', 1).single();
@@ -103,10 +108,13 @@ export default function App() {
     return <LoginScreen onLogin={setCurrentUser} supabase={supabase} />;
   }
 
-  // Controle de rotas baseado no perfil guardado
   if (currentUser.role === 'validador' || currentUser.email === 'validacao@premio.com') {
-    return <ValidacaoExtrasScreen supabase={supabase} onLogout={handleLogout} />;
-  }
+  return <ValidacaoExtrasScreen supabase={supabase} onLogout={handleLogout} />;
+}
+
+if (currentUser.email === 'programacao@premio.com') {
+  return <ProgramacaoViagensScreen supabase={supabase} onLogout={handleLogout} />;
+}
 
   return (
     <div className="min-h-screen bg-[#F4F7F9] text-slate-800 font-sans selection:bg-blue-200">
