@@ -29,29 +29,70 @@ export default function ProgramacaoViagensScreen({ supabase, onLogout }) {
     carregarViagens();
   }, [filtroData, filtroAviso]);
 
+  const normalizarData = (valor) => {
+    if (!valor) return '';
+
+    const texto = String(valor).trim().split(' ')[0];
+
+    if (texto.includes('/')) {
+      const [dia, mes, ano] = texto.split('/');
+      if (dia && mes && ano) return `${ano}-${mes.padStart(2, '0')}-${dia.padStart(2, '0')}`;
+    }
+
+    if (texto.includes('-')) {
+      const [ano, mes, dia] = texto.split('T')[0].split('-');
+      if (ano && mes && dia) return `${ano}-${mes.padStart(2, '0')}-${dia.padStart(2, '0')}`;
+    }
+
+    return '';
+  };
+
   const carregarViagens = async () => {
     setLoading(true);
 
     try {
-      let query = supabase
-        .from('viagens_extra')
-        .select('id, tipo_operacao, origem, destino, container, placa, frota, carreta, motorista, data, hora, status, comprovante_url, aviso_programacao, created_at')
-        .eq('data', filtroData)
-        .order('hora', { ascending: true })
-        .order('created_at', { ascending: true });
+      const pageSize = 1000;
+      let pagina = 0;
+      let registros = [];
+      let continuarBuscando = true;
 
-      if (filtroAviso === 'com_aviso') {
-        query = query.not('aviso_programacao', 'is', null);
+      while (continuarBuscando) {
+        const inicio = pagina * pageSize;
+        const fim = inicio + pageSize - 1;
+
+        let query = supabase
+          .from('viagens_extra')
+          .select('id, tipo_operacao, origem, destino, container, placa, frota, carreta, motorista, data, hora, status, comprovante_url, aviso_programacao, created_at')
+          .order('created_at', { ascending: false })
+          .range(inicio, fim);
+
+        if (filtroAviso === 'com_aviso') {
+          query = query.not('aviso_programacao', 'is', null);
+        }
+
+        if (filtroAviso === 'sem_aviso') {
+          query = query.is('aviso_programacao', null);
+        }
+
+        const { data, error } = await query;
+        if (error) throw error;
+
+        registros = [...registros, ...(data || [])];
+        continuarBuscando = data?.length === pageSize;
+        pagina += 1;
       }
 
-      if (filtroAviso === 'sem_aviso') {
-        query = query.is('aviso_programacao', null);
-      }
+      const registrosDoDia = filtroData
+        ? registros.filter((viagem) => normalizarData(viagem.data) === filtroData)
+        : registros;
 
-      const { data, error } = await query;
-      if (error) throw error;
+      registrosDoDia.sort((a, b) => {
+        const horaA = a.hora || '';
+        const horaB = b.hora || '';
+        return horaA.localeCompare(horaB);
+      });
 
-      setViagens(data || []);
+      setViagens(registrosDoDia);
     } catch (error) {
       console.error('Erro ao carregar viagens da programação:', error);
       alert('Erro ao carregar viagens da programação: ' + error.message);
