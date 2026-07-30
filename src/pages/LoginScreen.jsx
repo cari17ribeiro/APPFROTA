@@ -9,7 +9,8 @@ export default function LoginScreen({ onLogin, supabase }) {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   const EMAIL_VALIDADOR = import.meta.env.VITE_EMAIL_VALIDACAO;
-  const EMAIL_PROGRAMACAO = import.meta.env.VITE_EMAIL_PROGRAMACAO || 'programacao@premio.com';
+  const EMAIL_PROGRAMACAO = (import.meta.env.VITE_EMAIL_PROGRAMACAO || '').trim().toLowerCase();
+const EMAILS_PROGRAMACAO = ['programacao@premio.com', EMAIL_PROGRAMACAO].filter(Boolean);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -37,7 +38,7 @@ export default function LoginScreen({ onLogin, supabase }) {
         return;
       }
 
-      if (emailNormalizado === EMAIL_PROGRAMACAO.toLowerCase()) {
+      if (EMAILS_PROGRAMACAO.includes(emailNormalizado)) {
         onLogin({
           ...authData.user,
           email: emailNormalizado,
