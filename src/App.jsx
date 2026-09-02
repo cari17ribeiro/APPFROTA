@@ -5,7 +5,18 @@ import DriverDashboard from './pages/DriverDashboard.jsx';
 import AdminDashboard from './pages/AdminDashboard.jsx';
 import ValidacaoExtrasScreen from './pages/ValidacaoExtrasScreen.jsx';
 import ProgramacaoViagensScreen from './pages/ProgramacaoViagensScreen.jsx';
+import MandatoryVideoScreen from './components/MandatoryVideoScreen.jsx';
 import { supabase } from './lib/supabase.js';
+
+const MANDATORY_VIDEO_ID = 'eFaztZv-aUM';
+const VALIDATION_EMAILS = [
+  'validacao@premio.com',
+  (import.meta.env.VITE_EMAIL_VALIDACAO || '').trim().toLowerCase()
+].filter(Boolean);
+const PROGRAMMING_EMAILS = [
+  'programacao@premio.com',
+  (import.meta.env.VITE_EMAIL_PROGRAMACAO || '').trim().toLowerCase()
+].filter(Boolean);
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState(() => {
@@ -21,6 +32,8 @@ export default function App() {
   const [correcoesBloqueadas, setCorrecoesBloqueadas] = useState(false);
   const [ultimaAtualizacao, setUltimaAtualizacao] = useState(null);
   const [isLoadingData, setIsLoadingData] = useState(false);
+  const [videoGate, setVideoGate] = useState({ status: 'idle', error: '' });
+  const [videoCheckAttempt, setVideoCheckAttempt] = useState(0);
 
   useEffect(() => {
     if (currentUser) {
@@ -41,8 +54,101 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const checkMandatoryVideo = async () => {
+      if (!currentUser) {
+        setVideoGate({ status: 'idle', error: '' });
+        return;
+      }
+
+      setVideoGate({ status: 'checking', error: '' });
+
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      const authenticatedUser = authData?.user;
+
+      if (cancelled) return;
+
+      if (authError || !authenticatedUser || authenticatedUser.id !== currentUser.id) {
+        console.error('Erro ao validar usuário autenticado:', authError);
+        setVideoGate({
+          status: 'error',
+          error: 'Sua sessão não pôde ser validada. Saia e entre novamente.'
+        });
+        return;
+      }
+
+      const authenticatedEmail = (authenticatedUser.email || '').trim().toLowerCase();
+
+      if (VALIDATION_EMAILS.includes(authenticatedEmail)) {
+        if (currentUser.email !== authenticatedEmail || currentUser.role !== 'validador') {
+          setCurrentUser({ ...authenticatedUser, email: authenticatedEmail, role: 'validador' });
+        }
+        setVideoGate({ status: 'complete', error: '' });
+        return;
+      }
+
+      if (PROGRAMMING_EMAILS.includes(authenticatedEmail)) {
+        if (currentUser.email !== authenticatedEmail || currentUser.role !== 'programacao') {
+          setCurrentUser({
+            ...authenticatedUser,
+            email: authenticatedEmail,
+            motorista: 'Mesa de Programação',
+            role: 'programacao',
+            admin: false
+          });
+        }
+        setVideoGate({ status: 'complete', error: '' });
+        return;
+      }
+
+      const { data: profile, error: profileError } = await supabase
+        .from('motoristas_cadastrados')
+        .select('id, email, motorista, admin, video_obrigatorio_assistido')
+        .eq('id', authenticatedUser.id)
+        .single();
+
+      if (cancelled) return;
+
+      if (profileError || !profile) {
+        console.error('Erro ao verificar vídeo obrigatório:', profileError);
+        setVideoGate({
+          status: 'error',
+          error: 'Não foi possível validar seu perfil e a confirmação do vídeo. Verifique a conexão e tente novamente.'
+        });
+        return;
+      }
+
+      if (
+        currentUser.email !== profile.email ||
+        currentUser.motorista !== profile.motorista ||
+        Boolean(currentUser.admin) !== Boolean(profile.admin) ||
+        currentUser.role === 'validador' ||
+        currentUser.role === 'programacao'
+      ) {
+        setCurrentUser({ ...authenticatedUser, ...profile, role: null });
+      }
+
+      setVideoGate({
+        status: profile.admin || profile.video_obrigatorio_assistido ? 'complete' : 'required',
+        error: ''
+      });
+    };
+
+    checkMandatoryVideo();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser, videoCheckAttempt]);
+
   const fetchData = async () => {
     if (!currentUser) return;
+
+    if (videoGate.status !== 'complete') {
+      return;
+    }
 
     if (
       currentUser.role === 'validador' ||
@@ -98,7 +204,7 @@ export default function App() {
 
   useEffect(() => {
     fetchData();
-  }, [currentUser]);
+  }, [currentUser, videoGate.status]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -106,8 +212,73 @@ export default function App() {
     localStorage.removeItem('statusDiario_User');
   };
 
+  const handleMandatoryVideoComplete = async () => {
+    const { data, error } = await supabase
+      .from('motoristas_cadastrados')
+      .update({ video_obrigatorio_assistido: true })
+      .eq('id', currentUser.id)
+      .select('id, video_obrigatorio_assistido')
+      .single();
+
+    if (error || !data?.video_obrigatorio_assistido) {
+      console.error('Erro ao confirmar vídeo obrigatório:', error);
+      throw new Error('Não foi possível salvar a confirmação no Supabase. Tente novamente.');
+    }
+
+    setCurrentUser((user) => ({
+      ...user,
+      video_obrigatorio_assistido: true
+    }));
+    setVideoGate({ status: 'complete', error: '' });
+  };
+
   if (!currentUser) {
     return <LoginScreen onLogin={setCurrentUser} supabase={supabase} />;
+  }
+
+  if (['idle', 'checking'].includes(videoGate.status)) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center gap-4 px-4">
+        <Loader2 className="w-10 h-10 animate-spin text-blue-400" />
+        <p className="font-semibold text-center">Validando seu acesso...</p>
+      </div>
+    );
+  }
+
+  if (videoGate.status === 'error') {
+    return (
+      <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center px-4">
+        <div className="max-w-md w-full rounded-3xl border border-rose-800 bg-slate-900 p-7 text-center shadow-2xl">
+          <p className="text-rose-200 font-semibold">{videoGate.error}</p>
+          <div className="mt-6 flex flex-col sm:flex-row gap-3 justify-center">
+            <button
+              type="button"
+              onClick={() => setVideoCheckAttempt((attempt) => attempt + 1)}
+              className="rounded-xl bg-blue-600 hover:bg-blue-500 px-5 py-3 font-bold"
+            >
+              Tentar novamente
+            </button>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="rounded-xl border border-slate-600 hover:bg-slate-800 px-5 py-3 font-bold"
+            >
+              Sair
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (videoGate.status === 'required') {
+    return (
+      <MandatoryVideoScreen
+        videoId={MANDATORY_VIDEO_ID}
+        driverName={currentUser.motorista}
+        onComplete={handleMandatoryVideoComplete}
+      />
+    );
   }
 
   if (currentUser.role === 'validador' || currentUser.email === 'validacao@premio.com') {
