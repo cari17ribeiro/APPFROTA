@@ -23,7 +23,7 @@ const getValidContainerAlternatives = (alternatives = []) =>
     ).values()
   ).slice(0, 4);
 
-export default function ExtraTripScreen({ currentUser, onClose, supabase }) {
+export default function ExtraTripScreen({ currentUser, onClose, supabase, onAccessDenied }) {
   const [step, setStep] = useState(1);
   
   const [file, setFile] = useState(null);
@@ -237,6 +237,23 @@ export default function ExtraTripScreen({ currentUser, onClose, supabase }) {
     e.preventDefault();
     setIsSubmitting(true);
     try {
+      const { data: videoAccess, error: videoAccessError } = await supabase
+        .from('motoristas_cadastrados')
+        .select('video_obrigatorio_assistido')
+        .eq('id', currentUser.id)
+        .single();
+
+      if (videoAccessError || !videoAccess) {
+        console.error('Erro ao validar vídeo obrigatório antes do envio:', videoAccessError);
+        throw new Error('Não foi possível validar sua autorização. Verifique a conexão e tente novamente.');
+      }
+
+      if (!videoAccess.video_obrigatorio_assistido) {
+        alert('Você precisa concluir o vídeo obrigatório antes de enviar uma viagem extra.');
+        onAccessDenied?.();
+        return;
+      }
+
       let urlUnica = null;
       if (file) {
         const ext = file.name.split('.').pop() || 'jpg';

@@ -10,9 +10,10 @@ import AddTripModal from '../components/AddTripModal.jsx';
 import ExtraTripScreen from './ExtraTripScreen.jsx'; 
 import { calcularPeriodoViagem } from '../utils/periodos.js';
 
-export default function DriverDashboard({ currentUser, viagens, setViagens, pendentes, setPendentes, resumos, diesel, premiosLiberados, correcoesBloqueadas, ultimaAtualizacao, refreshData, supabase }) {
+export default function DriverDashboard({ currentUser, viagens, setViagens, pendentes, setPendentes, resumos, diesel, premiosLiberados, correcoesBloqueadas, ultimaAtualizacao, refreshData, supabase, onVideoAccessRevoked }) {
   const [showAddModal, setShowAddModal] = useState(false);
-  const [showExtraModal, setShowExtraModal] = useState(false); 
+  const [showExtraModal, setShowExtraModal] = useState(false);
+  const [isCheckingTripAccess, setIsCheckingTripAccess] = useState(false);
   
   // Filtros
   const [filtroCompetencia, setFiltroCompetencia] = useState('');
@@ -50,6 +51,40 @@ export default function DriverDashboard({ currentUser, viagens, setViagens, pend
     const todos = [...confirmadas, ...enviadas].sort((a, b) => new Date(b.data) - new Date(a.data));
     return todos.map(item => ({ ...item, _periodo: calcularPeriodoViagem(item.data) }));
   }, [viagens, pendentes, currentUser.email]);
+
+  const verifyVideoAccess = async () => {
+    const { data, error } = await supabase
+      .from('motoristas_cadastrados')
+      .select('video_obrigatorio_assistido')
+      .eq('id', currentUser.id)
+      .single();
+
+    if (error || !data) {
+      console.error('Erro ao validar acesso ao envio de viagens:', error);
+      alert('Não foi possível validar sua autorização. Verifique a conexão e tente novamente.');
+      return false;
+    }
+
+    if (!data.video_obrigatorio_assistido) {
+      onVideoAccessRevoked();
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleOpenTripPanel = async (openPanel) => {
+    if (isCheckingTripAccess) return;
+
+    setIsCheckingTripAccess(true);
+    try {
+      if (await verifyVideoAccess()) {
+        openPanel(true);
+      }
+    } finally {
+      setIsCheckingTripAccess(false);
+    }
+  };
 
   const competenciasResumoDisponiveis = useMemo(() => {
     const c1 = resumos.filter(r => r.email === currentUser.email).map(r => r.mes || r.competencia);
@@ -106,6 +141,8 @@ export default function DriverDashboard({ currentUser, viagens, setViagens, pend
   }, [historicoComPeriodo, filtroPeriodo, filtroTipo]);
 
   const handleAddTrip = async (newTripData) => {
+    if (!(await verifyVideoAccess())) return;
+
     const novaPendente = {
       user_id: currentUser.id,
       email: currentUser.email,
@@ -222,11 +259,12 @@ export default function DriverDashboard({ currentUser, viagens, setViagens, pend
       {/* Ações */}
       <div className="flex flex-col sm:flex-row justify-end gap-3">
          <button
-           onClick={() => setShowExtraModal(true)}
-           className="w-full sm:w-auto flex items-center justify-center space-x-2 bg-slate-800 hover:bg-slate-900 text-white px-7 py-3.5 rounded-2xl transition-all duration-300 shadow-md hover:shadow-lg font-bold"
+           onClick={() => handleOpenTripPanel(setShowExtraModal)}
+           disabled={isCheckingTripAccess}
+           className="w-full sm:w-auto flex items-center justify-center space-x-2 bg-slate-800 hover:bg-slate-900 text-white px-7 py-3.5 rounded-2xl transition-all duration-300 shadow-md hover:shadow-lg font-bold disabled:opacity-60 disabled:cursor-wait"
          >
            <Camera className="h-5 w-5 text-slate-300" />
-           <span>Registar Extra (OCR)</span>
+           <span>{isCheckingTripAccess ? 'Verificando acesso...' : 'Registar Extra (OCR)'}</span>
          </button>
 
          {correcoesBloqueadas ? (
@@ -236,8 +274,9 @@ export default function DriverDashboard({ currentUser, viagens, setViagens, pend
             </div>
          ) : (
             <button
-              onClick={() => setShowAddModal(true)}
-              className="w-full sm:w-auto flex items-center justify-center space-x-2 bg-gradient-to-r from-blue-600 to-teal-500 hover:from-blue-700 hover:to-teal-600 text-white px-7 py-3.5 rounded-2xl transition-all duration-300 shadow-md hover:shadow-lg font-bold"
+              onClick={() => handleOpenTripPanel(setShowAddModal)}
+              disabled={isCheckingTripAccess}
+              className="w-full sm:w-auto flex items-center justify-center space-x-2 bg-gradient-to-r from-blue-600 to-teal-500 hover:from-blue-700 hover:to-teal-600 text-white px-7 py-3.5 rounded-2xl transition-all duration-300 shadow-md hover:shadow-lg font-bold disabled:opacity-60 disabled:cursor-wait"
             >
               <Plus className="h-5 w-5 text-teal-200" />
               <span>Faltou uma viagem?</span>
@@ -467,7 +506,7 @@ export default function DriverDashboard({ currentUser, viagens, setViagens, pend
 
       {showAddModal && <AddTripModal currentUser={currentUser} onClose={() => setShowAddModal(false)} onSave={handleAddTrip} supabase={supabase} />}
       
-      {showExtraModal && <ExtraTripScreen currentUser={currentUser} onClose={() => setShowExtraModal(false)} onSave={handleAddTrip} supabase={supabase} />}
+      {showExtraModal && <ExtraTripScreen currentUser={currentUser} onClose={() => setShowExtraModal(false)} onSave={handleAddTrip} supabase={supabase} onAccessDenied={onVideoAccessRevoked} />}
     </div>
   );
 }

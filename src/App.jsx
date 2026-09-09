@@ -136,10 +136,20 @@ export default function App() {
       });
     };
 
+    const recheckWhenVisible = () => {
+      if (document.visibilityState === 'visible') {
+        checkMandatoryVideo();
+      }
+    };
+
     checkMandatoryVideo();
+    window.addEventListener('focus', checkMandatoryVideo);
+    document.addEventListener('visibilitychange', recheckWhenVisible);
 
     return () => {
       cancelled = true;
+      window.removeEventListener('focus', checkMandatoryVideo);
+      document.removeEventListener('visibilitychange', recheckWhenVisible);
     };
   }, [currentUser, videoCheckAttempt]);
 
@@ -358,6 +368,7 @@ export default function App() {
             correcoesBloqueadas={correcoesBloqueadas}
             refreshData={fetchData}
             supabase={supabase}
+            onVideoAccessRevoked={() => setVideoGate({ status: 'required', error: '' })}
           />
         )}
       </main>
