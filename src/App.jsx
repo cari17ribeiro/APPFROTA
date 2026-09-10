@@ -57,13 +57,17 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
 
-    const checkMandatoryVideo = async () => {
+    const checkMandatoryVideo = async ({ background = false } = {}) => {
       if (!currentUser) {
-        setVideoGate({ status: 'idle', error: '' });
+        if (!background) {
+          setVideoGate({ status: 'idle', error: '' });
+        }
         return;
       }
 
-      setVideoGate({ status: 'checking', error: '' });
+      if (!background) {
+        setVideoGate({ status: 'checking', error: '' });
+      }
 
       const { data: authData, error: authError } = await supabase.auth.getUser();
       const authenticatedUser = authData?.user;
@@ -72,25 +76,29 @@ export default function App() {
 
       if (authError || !authenticatedUser || authenticatedUser.id !== currentUser.id) {
         console.error('Erro ao validar usuário autenticado:', authError);
-        setVideoGate({
-          status: 'error',
-          error: 'Sua sessão não pôde ser validada. Saia e entre novamente.'
-        });
+        if (!background) {
+          setVideoGate({
+            status: 'error',
+            error: 'Sua sessão não pôde ser validada. Saia e entre novamente.'
+          });
+        }
         return;
       }
 
       const authenticatedEmail = (authenticatedUser.email || '').trim().toLowerCase();
 
       if (VALIDATION_EMAILS.includes(authenticatedEmail)) {
-        if (currentUser.email !== authenticatedEmail || currentUser.role !== 'validador') {
+        if (!background && (currentUser.email !== authenticatedEmail || currentUser.role !== 'validador')) {
           setCurrentUser({ ...authenticatedUser, email: authenticatedEmail, role: 'validador' });
         }
-        setVideoGate({ status: 'complete', error: '' });
+        if (!background) {
+          setVideoGate({ status: 'complete', error: '' });
+        }
         return;
       }
 
       if (PROGRAMMING_EMAILS.includes(authenticatedEmail)) {
-        if (currentUser.email !== authenticatedEmail || currentUser.role !== 'programacao') {
+        if (!background && (currentUser.email !== authenticatedEmail || currentUser.role !== 'programacao')) {
           setCurrentUser({
             ...authenticatedUser,
             email: authenticatedEmail,
@@ -99,7 +107,9 @@ export default function App() {
             admin: false
           });
         }
-        setVideoGate({ status: 'complete', error: '' });
+        if (!background) {
+          setVideoGate({ status: 'complete', error: '' });
+        }
         return;
       }
 
@@ -113,20 +123,22 @@ export default function App() {
 
       if (profileError || !profile) {
         console.error('Erro ao verificar vídeo obrigatório:', profileError);
-        setVideoGate({
-          status: 'error',
-          error: 'Não foi possível validar seu perfil e a confirmação do vídeo. Verifique a conexão e tente novamente.'
-        });
+        if (!background) {
+          setVideoGate({
+            status: 'error',
+            error: 'Não foi possível validar seu perfil e a confirmação do vídeo. Verifique a conexão e tente novamente.'
+          });
+        }
         return;
       }
 
-      if (
+      if (!background && (
         currentUser.email !== profile.email ||
         currentUser.motorista !== profile.motorista ||
         Boolean(currentUser.admin) !== Boolean(profile.admin) ||
         currentUser.role === 'validador' ||
         currentUser.role === 'programacao'
-      ) {
+      )) {
         setCurrentUser({ ...authenticatedUser, ...profile, role: null });
       }
 
@@ -136,19 +148,23 @@ export default function App() {
       });
     };
 
+    const recheckInBackground = () => {
+      checkMandatoryVideo({ background: true });
+    };
+
     const recheckWhenVisible = () => {
       if (document.visibilityState === 'visible') {
-        checkMandatoryVideo();
+        recheckInBackground();
       }
     };
 
     checkMandatoryVideo();
-    window.addEventListener('focus', checkMandatoryVideo);
+    window.addEventListener('focus', recheckInBackground);
     document.addEventListener('visibilitychange', recheckWhenVisible);
 
     return () => {
       cancelled = true;
-      window.removeEventListener('focus', checkMandatoryVideo);
+      window.removeEventListener('focus', recheckInBackground);
       document.removeEventListener('visibilitychange', recheckWhenVisible);
     };
   }, [currentUser, videoCheckAttempt]);
