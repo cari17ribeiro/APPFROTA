@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Loader2, Search, CheckCircle, AlertCircle, Image as ImageIcon, XCircle, Save, Filter, ArrowRight, BarChart3, ListTodo, Download, FileSpreadsheet, PieChart, Trash2 } from 'lucide-react';
+import { Loader2, Search, CheckCircle, AlertCircle, Image as ImageIcon, XCircle, Save, Filter, ArrowRight, BarChart3, ListTodo, Download, FileSpreadsheet, PieChart, Trash2, UserCog } from 'lucide-react';
+import AppManagementScreen from './AppManagementScreen.jsx';
 
-export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
+export default function ValidacaoExtrasScreen({ supabase, currentUser, onLogout }) {
   const [activeTab, setActiveTab] = useState('validacao');
   const [viagens, setViagens] = useState([]);
   const [historico, setHistorico] = useState([]);
@@ -344,10 +345,17 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
           >
             <FileSpreadsheet className="w-4 h-4 mr-2" /> Histórico
           </button>
+          <button
+            onClick={() => setActiveTab('gestao-app')}
+            className={`px-6 py-3 font-bold text-sm rounded-t-xl transition-colors flex items-center whitespace-nowrap ${activeTab === 'gestao-app' ? 'bg-slate-100 text-slate-900' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
+          >
+            <UserCog className="w-4 h-4 mr-2" /> Gestão do app
+          </button>
         </div>
       </header>
 
       <main className="flex-1 p-6 max-w-7xl mx-auto w-full space-y-6">
+        {activeTab !== 'gestao-app' && (
         <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-wrap gap-4 items-end">
           {(activeTab === 'validacao' || activeTab === 'historico') && (
             <div className="flex-1 min-w-[200px]">
@@ -386,6 +394,7 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
             <Download className="w-4 h-4 mr-2" /> Exportar Dados
           </button>
         </div>
+        )}
 
         {activeTab === 'validacao' && (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
@@ -586,6 +595,10 @@ export default function ValidacaoExtrasScreen({ supabase, onLogout }) {
               </table>
             </div>
           </div>
+        )}
+
+        {activeTab === 'gestao-app' && (
+          <AppManagementScreen supabase={supabase} currentUser={currentUser} />
         )}
       </main>
 

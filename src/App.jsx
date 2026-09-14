@@ -308,7 +308,7 @@ export default function App() {
   }
 
   if (currentUser.role === 'validador' || currentUser.email === 'validacao@premio.com') {
-    return <ValidacaoExtrasScreen supabase={supabase} onLogout={handleLogout} />;
+    return <ValidacaoExtrasScreen supabase={supabase} currentUser={currentUser} onLogout={handleLogout} />;
   }
 
   if (currentUser.role === 'programacao' || currentUser.email === 'programacao@premio.com') {
