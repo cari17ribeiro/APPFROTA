@@ -31,6 +31,7 @@ export default function AdminDashboard({ viagens, pendentes, setPendentes, premi
   const [filterMes, setFilterMes] = useState('');
   const [filterTipo, setFilterTipo] = useState('');
   const [jaBuscouBase, setJaBuscouBase] = useState(false);
+  const [listaMotoristas, setListaMotoristas] = useState([]);
   const toggleSort = (type) => setSortBy(sortBy === `${type}_desc` ? `${type}_asc` : `${type}_desc`);
 
   // Pagina os resultados para evitar o limite por resposta do Supabase.
@@ -46,6 +47,39 @@ export default function AdminDashboard({ viagens, pendentes, setPendentes, premi
     return resultados;
   };
 
+
+  const mesesDisponiveis = useMemo(() => {
+    const meses = [];
+    const hoje = new Date();
+    for (let i = 0; i < 60; i++) {
+      const data = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
+      meses.push(
+        String(data.getMonth() + 1).padStart(2, '0') + '/' + data.getFullYear()
+      );
+    }
+    return meses;
+  }, []);
+
+  useEffect(() => {
+    let ativo = true;
+    supabase
+      .from('motoristas_cadastrados')
+      .select('motorista')
+      .not('motorista', 'is', null)
+      .order('motorista', { ascending: true })
+      .limit(1000)
+      .then(({ data, error }) => {
+        if (error) {
+          console.error('Erro ao carregar nomes dos motoristas:', error);
+          return;
+        }
+        if (ativo) {
+          const nomes = [...new Set((data || []).map(item => item.motorista).filter(Boolean))];
+          setListaMotoristas(nomes);
+        }
+      });
+    return () => { ativo = false; };
+  }, [supabase]);
 
   const aguardando = pendentes.filter(p => p.status === 'Em Análise');
   const historico = pendentes.filter(p => p.status !== 'Em Análise');
@@ -77,7 +111,7 @@ export default function AdminDashboard({ viagens, pendentes, setPendentes, premi
       let resultados = [];
       for (let inicio = 0; ; inicio += tamanhoPagina) {
         let consulta = supabase.from('minhas_viagens').select('*');
-        if (filterMotorista.trim()) consulta = consulta.ilike('motorista', '%' + filterMotorista.trim() + '%');
+        if (filterMotorista.trim()) consulta = consulta.eq('motorista', filterMotorista.trim());
         if (filterMes.trim()) consulta = consulta.eq('mes', filterMes.trim());
         if (filterTipo) consulta = consulta.eq('tipo', filterTipo);
         const { data, error } = await consulta.order('data', { ascending: false }).range(inicio, inicio + tamanhoPagina - 1);
@@ -674,8 +708,14 @@ export default function AdminDashboard({ viagens, pendentes, setPendentes, premi
         {activeTab === 'todas' && (
           <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-5 bg-slate-50/50 border-b border-slate-100">
             <span className="text-sm font-bold text-slate-500 uppercase tracking-wider">Buscar:</span>
-            <input type="text" value={filterMotorista} onChange={e => setFilterMotorista(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleBuscarBase()} placeholder="Nome do motorista" className="text-sm font-semibold border border-slate-200 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-blue-500/20 bg-white" />
-            <input type="text" value={filterMes} onChange={e => setFilterMes(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleBuscarBase()} placeholder="Mês (ex.: 03/2026)" className="text-sm font-semibold border border-slate-200 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-blue-500/20 bg-white" />
+            <select value={filterMotorista} onChange={e => setFilterMotorista(e.target.value)} className="text-sm font-semibold border border-slate-200 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-blue-500/20 bg-white">
+              <option value="">Selecione um motorista</option>
+              {listaMotoristas.map(nome => <option key={nome} value={nome}>{nome}</option>)}
+            </select>
+            <select value={filterMes} onChange={e => setFilterMes(e.target.value)} className="text-sm font-semibold border border-slate-200 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-blue-500/20 bg-white">
+              <option value="">Selecione um mês</option>
+              {mesesDisponiveis.map(mes => <option key={mes} value={mes}>{mes}</option>)}
+            </select>
             <select value={filterTipo} onChange={e => setFilterTipo(e.target.value)} className="text-sm font-semibold border border-slate-200 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-indigo-500/20 bg-white">
               <option value="">Todos os Tipos</option>
               <option value="IMPO">IMPO</option><option value="EXPO">EXPO</option><option value="EXTRA">EXTRA</option>
