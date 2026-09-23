@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Lock, Unlock, FileSpreadsheet, Users, UserPlus, AlertCircle, 
   Loader2, CheckCircle, Download, ArrowUpDown, MessageSquare, 
@@ -14,9 +14,11 @@ export default function AdminDashboard({ viagens, pendentes, setPendentes, premi
   const [mesImportacao, setMesImportacao] = useState('');
   const [isImportingUnificado, setIsImportingUnificado] = useState(false);
   const [isExportExtraOpen, setIsExportExtraOpen] = useState(false);
-  const [dataInicioExtra, setDataInicioExtra] = useState('');
-  const [dataFimExtra, setDataFimExtra] = useState('');
-  const [isExportingExtra, setIsExportingExtra] = useState(false);
+  const [dataInicioExtra, setDataInicioExtra] = useState('');
+  const [dataFimExtra, setDataFimExtra] = useState('');
+  const [isExportingExtra, setIsExportingExtra] = useState(false);
+  const [baseCompleta, setBaseCompleta] = useState([]);
+  const [isLoadingBase, setIsLoadingBase] = useState(false);
 
   const [nomeMotorista, setNomeMotorista] = useState('');
   const [emailMotorista, setEmailMotorista] = useState('');
@@ -30,6 +32,37 @@ export default function AdminDashboard({ viagens, pendentes, setPendentes, premi
   const [filterTipo, setFilterTipo] = useState('');
   const toggleSort = (type) => setSortBy(sortBy === `${type}_desc` ? `${type}_asc` : `${type}_desc`);
 
+  // Pagina os resultados para evitar o limite por resposta do Supabase.
+  const buscarTodasAsLinhas = async (tabela, colunas) => {
+    const tamanhoPagina = 1000;
+    let resultados = [];
+    for (let inicio = 0; ; inicio += tamanhoPagina) {
+      const { data, error } = await supabase.from(tabela).select(colunas).range(inicio, inicio + tamanhoPagina - 1);
+      if (error) throw error;
+      resultados = resultados.concat(data || []);
+      if (!data || data.length < tamanhoPagina) break;
+    }
+    return resultados;
+  };
+
+  useEffect(() => {
+    let ativo = true;
+    const carregarBaseCompleta = async () => {
+      setIsLoadingBase(true);
+      try {
+        const dados = await buscarTodasAsLinhas('minhas_viagens', '*');
+        if (ativo) setBaseCompleta(dados);
+      } catch (error) {
+        console.error('Erro ao carregar a base completa:', error);
+        if (ativo) alert('Erro ao carregar a base completa: ' + error.message);
+      } finally {
+        if (ativo) setIsLoadingBase(false);
+      }
+    };
+    carregarBaseCompleta();
+    return () => { ativo = false; };
+  }, [supabase]);
+
   const aguardando = pendentes.filter(p => p.status === 'Em Análise');
   const historico = pendentes.filter(p => p.status !== 'Em Análise');
 
@@ -42,18 +75,18 @@ export default function AdminDashboard({ viagens, pendentes, setPendentes, premi
     return list;
   }, [aguardando, sortBy]);
 
-  const uniqueMotoristas = useMemo(() => [...new Set(viagens.map(v => v.motorista))], [viagens]);
-  const uniqueMeses = useMemo(() => [...new Set(viagens.map(v => v.mes))], [viagens]);
-  const uniqueTipos = useMemo(() => [...new Set(viagens.map(v => v.tipo).filter(Boolean))], [viagens]);
+  const uniqueMotoristas = useMemo(() => [...new Set(baseCompleta.map(v => v.motorista).filter(Boolean))], [baseCompleta]);
+  const uniqueMeses = useMemo(() => [...new Set(baseCompleta.map(v => v.mes).filter(Boolean))], [baseCompleta]);
+  const uniqueTipos = useMemo(() => [...new Set(baseCompleta.map(v => v.tipo).filter(Boolean))], [baseCompleta]);
 
   const todasViagensFiltradas = useMemo(() => {
-    return viagens.filter(v => {
+    return baseCompleta.filter(v => {
       const matchMotorista = filterMotorista ? v.motorista === filterMotorista : true;
       const matchMes = filterMes ? v.mes === filterMes : true;
       const matchTipo = filterTipo ? v.tipo === filterTipo : true;
       return matchMotorista && matchMes && matchTipo;
     }).sort((a, b) => new Date(b.data) - new Date(a.data));
-  }, [viagens, filterMotorista, filterMes, filterTipo]);
+  }, [baseCompleta, filterMotorista, filterMes, filterTipo]);
 
   let displayedTrips = activeTab === 'Em Análise' ? aguardandoSorted : activeTab === 'historico' ? historico : todasViagensFiltradas;
 
@@ -138,10 +171,11 @@ export default function AdminDashboard({ viagens, pendentes, setPendentes, premi
   };
 
   const handleExportarMotoristas = async () => {
-    const { data, error } = await supabase.from('motoristas_cadastrados').select('motorista, email');
-    
-    if (error) {
-      alert('Erro ao buscar a lista de motoristas cadastrados.');
+    let data;
+    try {
+      data = await buscarTodasAsLinhas('motoristas_cadastrados', 'motorista, email');
+    } catch (error) {
+      alert('Erro ao buscar a lista de motoristas cadastrados: ' + error.message);
       return;
     }
 
@@ -357,73 +391,69 @@ export default function AdminDashboard({ viagens, pendentes, setPendentes, premi
   };
 
  const handleExportarExtras = async () => {
-    if (!dataInicioExtra || !dataFimExtra) {
-      alert("Por favor, selecione a data inicial e final.");
-      return;
-    }
+    if (!dataInicioExtra || !dataFimExtra) {
+      alert("Por favor, selecione a data inicial e final.");
+      return;
+    }
 
-    setIsExportingExtra(true);
-    try {
-      
-      const { data, error } = await supabase
-        .from('viagens_extra')
-        .select('tipo_operacao, origem, destino, container, placa, motorista, data, hora, status');
+    setIsExportingExtra(true);
+    try {
+      
+      const data = await buscarTodasAsLinhas('viagens_extra', 'tipo_operacao, origem, destino, container, placa, motorista, data, hora, status');
 
-      if (error) throw error;
+      if (!data || data.length === 0) {
+        alert("A tabela de viagens extras está vazia no banco de dados.");
+        setIsExportingExtra(false);
+        return;
+      }
 
-      if (!data || data.length === 0) {
-        alert("A tabela de viagens extras está vazia no banco de dados.");
-        setIsExportingExtra(false);
-        return;
-      }
+      const dataInicio = new Date(`${dataInicioExtra}T00:00:00`);
+      const dataFim = new Date(`${dataFimExtra}T23:59:59`);
 
-      const dataInicio = new Date(`${dataInicioExtra}T00:00:00`);
-      const dataFim = new Date(`${dataFimExtra}T23:59:59`);
+      const dadosFiltrados = data.filter(item => {
+        if (!item.data) return false;
+        
+        let dataItem;
+        if (item.data.includes('/')) {
+          const [d, m, a] = item.data.split(' ')[0].split('/');
+          dataItem = new Date(a, m - 1, d);
+        } 
+        else if (item.data.includes('-')) {
+          const [a, m, d] = item.data.split(' ')[0].split('-');
+          dataItem = new Date(a, m - 1, d);
+        } else {
+          dataItem = new Date(item.data);
+        }
 
-      const dadosFiltrados = data.filter(item => {
-        if (!item.data) return false;
-        
-        let dataItem;
-        if (item.data.includes('/')) {
-          const [d, m, a] = item.data.split(' ')[0].split('/');
-          dataItem = new Date(a, m - 1, d);
-        } 
-        else if (item.data.includes('-')) {
-          const [a, m, d] = item.data.split(' ')[0].split('-');
-          dataItem = new Date(a, m - 1, d);
-        } else {
-          dataItem = new Date(item.data);
-        }
+        return dataItem >= dataInicio && dataItem <= dataFim;
+      });
 
-        return dataItem >= dataInicio && dataItem <= dataFim;
-      });
+      if (dadosFiltrados.length === 0) {
+        alert("Nenhuma viagem extra encontrada neste período.");
+        setIsExportingExtra(false);
+        return;
+      }
 
-      if (dadosFiltrados.length === 0) {
-        alert("Nenhuma viagem extra encontrada neste período.");
-        setIsExportingExtra(false);
-        return;
-      }
+      if (!window.XLSX) {
+        alert('A biblioteca do Excel está a carregar. Tente novamente.');
+        setIsExportingExtra(false);
+        return;
+      }
 
-      if (!window.XLSX) {
-        alert('A biblioteca do Excel está a carregar. Tente novamente.');
-        setIsExportingExtra(false);
-        return;
-      }
-
-      const ws = window.XLSX.utils.json_to_sheet(dadosFiltrados);
-      const wb = window.XLSX.utils.book_new();
-      window.XLSX.utils.book_append_sheet(wb, ws, "Viagens Extras");
-      
-      const formatNome = (dt) => dt.split('-').reverse().join('-');
-      window.XLSX.writeFile(wb, `Extras_${formatNome(dataInicioExtra)}_ate_${formatNome(dataFimExtra)}.xlsx`);
-      
-      setIsExportExtraOpen(false);
-    } catch (error) {
-      alert("Erro ao exportar extras: " + error.message);
-    } finally {
-      setIsExportingExtra(false);
-    }
-  };
+      const ws = window.XLSX.utils.json_to_sheet(dadosFiltrados);
+      const wb = window.XLSX.utils.book_new();
+      window.XLSX.utils.book_append_sheet(wb, ws, "Viagens Extras");
+      
+      const formatNome = (dt) => dt.split('-').reverse().join('-');
+      window.XLSX.writeFile(wb, `Extras_${formatNome(dataInicioExtra)}_ate_${formatNome(dataFimExtra)}.xlsx`);
+      
+      setIsExportExtraOpen(false);
+    } catch (error) {
+      alert("Erro ao exportar extras: " + error.message);
+    } finally {
+      setIsExportingExtra(false);
+    }
+  };
 
   return (
     <div className="space-y-8">
@@ -617,6 +647,10 @@ export default function AdminDashboard({ viagens, pendentes, setPendentes, premi
               </div>
             </div>
           </div>
+        )}
+
+        {activeTab === 'todas' && isLoadingBase && (
+          <div className="p-5 text-center text-slate-500 font-medium">Carregando todos os registros da base...</div>
         )}
 
         {['Em Análise', 'historico', 'todas'].includes(activeTab) && displayedTrips.length > 0 && (
