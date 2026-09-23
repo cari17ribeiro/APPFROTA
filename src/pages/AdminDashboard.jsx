@@ -30,6 +30,7 @@ export default function AdminDashboard({ viagens, pendentes, setPendentes, premi
   const [filterMotorista, setFilterMotorista] = useState('');
   const [filterMes, setFilterMes] = useState('');
   const [filterTipo, setFilterTipo] = useState('');
+  const [jaBuscouBase, setJaBuscouBase] = useState(false);
   const toggleSort = (type) => setSortBy(sortBy === `${type}_desc` ? `${type}_asc` : `${type}_desc`);
 
   // Pagina os resultados para evitar o limite por resposta do Supabase.
@@ -45,23 +46,6 @@ export default function AdminDashboard({ viagens, pendentes, setPendentes, premi
     return resultados;
   };
 
-  useEffect(() => {
-    let ativo = true;
-    const carregarBaseCompleta = async () => {
-      setIsLoadingBase(true);
-      try {
-        const dados = await buscarTodasAsLinhas('minhas_viagens', '*');
-        if (ativo) setBaseCompleta(dados);
-      } catch (error) {
-        console.error('Erro ao carregar a base completa:', error);
-        if (ativo) alert('Erro ao carregar a base completa: ' + error.message);
-      } finally {
-        if (ativo) setIsLoadingBase(false);
-      }
-    };
-    carregarBaseCompleta();
-    return () => { ativo = false; };
-  }, [supabase]);
 
   const aguardando = pendentes.filter(p => p.status === 'Em Análise');
   const historico = pendentes.filter(p => p.status !== 'Em Análise');
@@ -75,20 +59,40 @@ export default function AdminDashboard({ viagens, pendentes, setPendentes, premi
     return list;
   }, [aguardando, sortBy]);
 
-  const uniqueMotoristas = useMemo(() => [...new Set(baseCompleta.map(v => v.motorista).filter(Boolean))], [baseCompleta]);
-  const uniqueMeses = useMemo(() => [...new Set(baseCompleta.map(v => v.mes).filter(Boolean))], [baseCompleta]);
-  const uniqueTipos = useMemo(() => [...new Set(baseCompleta.map(v => v.tipo).filter(Boolean))], [baseCompleta]);
-
-  const todasViagensFiltradas = useMemo(() => {
-    return baseCompleta.filter(v => {
-      const matchMotorista = filterMotorista ? v.motorista === filterMotorista : true;
-      const matchMes = filterMes ? v.mes === filterMes : true;
-      const matchTipo = filterTipo ? v.tipo === filterTipo : true;
-      return matchMotorista && matchMes && matchTipo;
-    }).sort((a, b) => new Date(b.data) - new Date(a.data));
-  }, [baseCompleta, filterMotorista, filterMes, filterTipo]);
+  const todasViagensFiltradas = useMemo(() => [...baseCompleta].sort((a, b) => new Date(b.data) - new Date(a.data)), [baseCompleta]);
 
   let displayedTrips = activeTab === 'Em Análise' ? aguardandoSorted : activeTab === 'historico' ? historico : todasViagensFiltradas;
+
+  const handleBuscarBase = async () => {
+    if (!filterMotorista.trim() && !filterMes.trim()) {
+      alert('Informe um motorista, um mês ou os dois filtros para pesquisar.');
+      return;
+    }
+
+    setIsLoadingBase(true);
+    setBaseCompleta([]);
+    setJaBuscouBase(false);
+    try {
+      const tamanhoPagina = 1000;
+      let resultados = [];
+      for (let inicio = 0; ; inicio += tamanhoPagina) {
+        let consulta = supabase.from('minhas_viagens').select('*');
+        if (filterMotorista.trim()) consulta = consulta.ilike('motorista', '%' + filterMotorista.trim() + '%');
+        if (filterMes.trim()) consulta = consulta.eq('mes', filterMes.trim());
+        if (filterTipo) consulta = consulta.eq('tipo', filterTipo);
+        const { data, error } = await consulta.order('data', { ascending: false }).range(inicio, inicio + tamanhoPagina - 1);
+        if (error) throw error;
+        resultados = resultados.concat(data || []);
+        if (!data || data.length < tamanhoPagina) break;
+      }
+      setBaseCompleta(resultados);
+      setJaBuscouBase(true);
+    } catch (error) {
+      alert('Erro ao buscar viagens: ' + error.message);
+    } finally {
+      setIsLoadingBase(false);
+    }
+  };
 
   const handleToggleBloqueio = async () => {
     const novoValor = !correcoesBloqueadas;
@@ -650,7 +654,7 @@ export default function AdminDashboard({ viagens, pendentes, setPendentes, premi
         )}
 
         {activeTab === 'todas' && isLoadingBase && (
-          <div className="p-5 text-center text-slate-500 font-medium">Carregando todos os registros da base...</div>
+          <div className="p-5 text-center text-slate-500 font-medium">Buscando registros...</div>
         )}
 
         {['Em Análise', 'historico', 'todas'].includes(activeTab) && displayedTrips.length > 0 && (
@@ -669,30 +673,27 @@ export default function AdminDashboard({ viagens, pendentes, setPendentes, premi
 
         {activeTab === 'todas' && (
           <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-5 bg-slate-50/50 border-b border-slate-100">
-            <span className="text-sm font-bold text-slate-500 uppercase tracking-wider flex items-center mr-2">
-               Filtrar:
-            </span>
-            <select value={filterMotorista} onChange={e => setFilterMotorista(e.target.value)} className="text-sm font-semibold border border-slate-200 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-blue-500/20 bg-white">
-              <option value="">Todos os Motoristas</option>
-              {uniqueMotoristas.map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
-            <select value={filterMes} onChange={e => setFilterMes(e.target.value)} className="text-sm font-semibold border border-slate-200 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-blue-500/20 bg-white">
-              <option value="">Todos os Meses</option>
-              {uniqueMeses.map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
+            <span className="text-sm font-bold text-slate-500 uppercase tracking-wider">Buscar:</span>
+            <input type="text" value={filterMotorista} onChange={e => setFilterMotorista(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleBuscarBase()} placeholder="Nome do motorista" className="text-sm font-semibold border border-slate-200 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-blue-500/20 bg-white" />
+            <input type="text" value={filterMes} onChange={e => setFilterMes(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleBuscarBase()} placeholder="Mês (ex.: 03/2026)" className="text-sm font-semibold border border-slate-200 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-blue-500/20 bg-white" />
             <select value={filterTipo} onChange={e => setFilterTipo(e.target.value)} className="text-sm font-semibold border border-slate-200 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-indigo-500/20 bg-white">
               <option value="">Todos os Tipos</option>
-              {uniqueTipos.map(t => <option key={t} value={t}>{t}</option>)}
+              <option value="IMPO">IMPO</option><option value="EXPO">EXPO</option><option value="EXTRA">EXTRA</option>
             </select>
+            <button onClick={handleBuscarBase} disabled={isLoadingBase} className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:opacity-60">Buscar</button>
           </div>
         )}
 
-        {['Em Análise', 'historico', 'todas'].includes(activeTab) && displayedTrips.length === 0 ? (
+        {activeTab === 'todas' && jaBuscouBase && displayedTrips.length === 0 ? (
+          <div className="p-12 text-center text-slate-500">Nenhuma viagem encontrada com esses filtros.</div>
+        ) : activeTab === 'todas' && !jaBuscouBase && !isLoadingBase ? (
+          <div className="p-12 text-center text-slate-500">Informe motorista e/ou mês e clique em Buscar.</div>
+        ) : ['Em Análise', 'historico'].includes(activeTab) && displayedTrips.length === 0 ? (
           <div className="p-20 text-center flex flex-col items-center">
             <div className="bg-slate-50 p-6 rounded-full mb-4"><CheckCircle className="h-10 w-10 text-slate-300" /></div>
             <p className="text-slate-500 text-lg font-medium">Nenhum registo pendente nesta vista.</p>
           </div>
-        ) : ['Em Análise', 'historico', 'todas'].includes(activeTab) && (
+        ) : (['Em Análise', 'historico'].includes(activeTab) || (activeTab === 'todas' && jaBuscouBase)) && (
           <ul className="divide-y divide-slate-100">
             {displayedTrips.map(item => {
               const isPendente = item.status === 'Em Análise';
